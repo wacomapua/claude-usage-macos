@@ -1,0 +1,56 @@
+name: ClaudeUsage
+
+options:
+  bundleIdPrefix: com.wacomapua
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    # Ad-hoc signing: enough to run locally and to register the widget extension,
+    # and it needs no developer account or provisioning profile. Swap in a real
+    # identity + DEVELOPMENT_TEAM if you ever want to distribute this.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGNING_REQUIRED: YES
+    CODE_SIGNING_ALLOWED: YES
+    PROVISIONING_PROFILE_SPECIFIER: ""
+    DEVELOPMENT_TEAM: ""
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  # The host app does the file reading. It is deliberately NOT sandboxed, because it
+  # has to reach ~/.claude-* which no sandboxed process can see.
+  ClaudeUsage:
+    type: application
+    platform: macOS
+    sources: [Shared, App]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wacomapua.claudeusage
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/ClaudeUsage.entitlements
+        ENABLE_APP_SANDBOX: NO
+        COMBINE_HIDPI_IMAGES: YES
+    dependencies:
+      - target: ClaudeUsageWidget
+        embed: true
+        codeSign: true
+
+  # macOS forces widget extensions to be sandboxed, so this target only ever reads the
+  # snapshot the host app leaves in the shared App Group container.
+  ClaudeUsageWidget:
+    type: app-extension
+    platform: macOS
+    sources: [Shared, Widget]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wacomapua.claudeusage.widget
+        INFOPLIST_FILE: Widget/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Widget/ClaudeUsageWidget.entitlements
+        ENABLE_APP_SANDBOX: YES
+        SKIP_INSTALL: YES

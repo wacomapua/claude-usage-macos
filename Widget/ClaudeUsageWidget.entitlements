@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Widget extensions are always sandboxed. We deliberately do NOT request an App
+	  Group here: that entitlement needs a provisioning profile from a registered
+	  App Group ID. Instead the host app writes the snapshot straight into this
+	  extension's own container, which the sandbox always permits us to read.
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+</dict>
+</plist>
