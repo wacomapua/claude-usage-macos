@@ -29,13 +29,53 @@ func render<V: View>(_ view: V, size: CGSize, scheme: ColorScheme, to path: Stri
     print("wrote \(path)")
 }
 
+/// Synthetic data covering the states real usage rarely reaches: a hot dial, an
+/// over-pace burn, and a window that has already rolled over. Without this the design
+/// only ever gets reviewed at the cool end of the scale.
+func stressSnapshot(now: Date) -> UsageSnapshot {
+    UsageSnapshot(
+        accounts: [
+            AccountUsage(
+                id: ".claude-hot", label: "Burning", email: "hot@example.com",
+                plan: "Max 20×", fetchedAt: now.addingTimeInterval(-120),
+                // 94% spent with most of the window still to run — hard over pace.
+                session: Gauge(percent: 94, resetsAt: now.addingTimeInterval(3600 * 3.5)),
+                weekly: Gauge(percent: 68, resetsAt: now.addingTimeInterval(3600 * 90)),
+                scoped: [ScopedGauge(name: "Opus", percent: 81,
+                                     resetsAt: now.addingTimeInterval(3600 * 90))],
+                spend: Spend(usedMinor: 128_00, limitMinor: 200_00,
+                             currency: "USD", exponent: 2, enabled: true)
+            ),
+            AccountUsage(
+                id: ".claude-stale", label: "Idle", email: "stale@example.com",
+                plan: "Pro", fetchedAt: now.addingTimeInterval(-3600 * 30),
+                // Reset time already passed — must render as "reset", not as 47%.
+                session: Gauge(percent: 47, resetsAt: now.addingTimeInterval(-3600 * 6)),
+                weekly: Gauge(percent: 52, resetsAt: now.addingTimeInterval(3600 * 20)),
+                scoped: [],
+                spend: nil
+            ),
+        ],
+        generatedAt: now
+    )
+}
+
 @MainActor
 func main() {
     let outputDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "."
-    // Prefer the user's real snapshot; fall back to sample data.
-    let snapshot = SnapshotStore.read() ?? .placeholder
     let now = Date()
 
+    if CommandLine.arguments.contains("--stress") {
+        renderAll(stressSnapshot(now: now), now: now, prefix: "stress", into: outputDir)
+        return
+    }
+
+    // Prefer the user's real snapshot; fall back to sample data.
+    renderAll(SnapshotStore.read() ?? .placeholder, now: now, prefix: nil, into: outputDir)
+}
+
+@MainActor
+func renderAll(_ snapshot: UsageSnapshot, now: Date, prefix: String?, into outputDir: String) {
     // Standard macOS widget point sizes.
     let sizes: [(String, CGSize)] = [
         ("small", CGSize(width: 170, height: 170)),
@@ -51,7 +91,8 @@ func main() {
             case "large": AnyView(UsageLargeView(snapshot: snapshot, now: now))
             default: AnyView(UsageMediumView(snapshot: snapshot, now: now))
             }
-            render(view, size: size, scheme: scheme, to: "\(outputDir)/\(name)-\(suffix).png")
+            let stem = prefix.map { "\($0)-\(name)" } ?? name
+            render(view, size: size, scheme: scheme, to: "\(outputDir)/\(stem)-\(suffix).png")
         }
     }
 }

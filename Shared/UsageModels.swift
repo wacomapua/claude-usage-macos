@@ -1,5 +1,12 @@
 import Foundation
 
+/// How long each kind of limit window runs for. Needed to work out how far through a
+/// window you are, which is what the dial's pace marker is derived from.
+enum LimitWindow {
+    static let session: TimeInterval = 5 * 60 * 60
+    static let weekly: TimeInterval = 7 * 24 * 60 * 60
+}
+
 /// One rate-limit bar (a 5-hour session window, a weekly window, ...).
 struct Gauge: Codable, Hashable {
     var percent: Int

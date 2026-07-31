@@ -25,49 +25,58 @@ struct ContentView: View {
 
 private struct AccountCard: View {
     var account: AccountUsage
+    private let now = Date()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(account.label).font(.headline)
-                Text(account.plan)
-                    .font(.caption2.weight(.medium))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(.quaternary, in: .capsule)
-                Spacer()
-                StalenessLabel(account: account)
-            }
+        HStack(alignment: .top, spacing: 16) {
+            DialGauge(
+                percent: account.session?.percent ?? 0,
+                resetsAt: account.session?.resetsAt,
+                window: LimitWindow.session,
+                now: now,
+                size: 112,
+                caption: "5H"
+            )
 
-            Text(account.email)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                AccountHeader(account: account, size: 14)
+                Text(account.email)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
 
-            if let session = account.session {
-                UsageBar(title: "Session (5h)", percent: session.percent, resetsAt: session.resetsAt)
-            }
-            if let weekly = account.weekly {
-                UsageBar(title: "Weekly", percent: weekly.percent, resetsAt: weekly.resetsAt)
-            }
-            ForEach(account.scoped) { scoped in
-                UsageBar(title: "Weekly · \(scoped.name)", percent: scoped.percent, resetsAt: scoped.resetsAt)
-            }
-
-            if account.session == nil && account.weekly == nil {
-                Text("No usage cached yet — run Claude Code under this account once.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            if let spend = account.spend {
-                HStack(spacing: 4) {
-                    Image(systemName: "creditcard").font(.caption2)
-                    Text("Extra usage \(spend.usedText)" + (spend.limitText.map { " of \($0)" } ?? ""))
-                        .font(.caption)
+                if let weekly = account.weekly {
+                    MiniMeter(title: "Weekly", percent: weekly.percent,
+                              resetsAt: weekly.resetsAt, now: now)
                 }
-                .foregroundStyle(.secondary)
+                ForEach(account.scoped) { scoped in
+                    MiniMeter(title: scoped.name, percent: scoped.percent,
+                              resetsAt: scoped.resetsAt, now: now)
+                }
+
+                if account.session == nil && account.weekly == nil {
+                    Text("No usage cached yet — run Claude Code under this account once.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 5) {
+                    if let spend = account.spend {
+                        Text(spend.usedText)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Text("extra usage" + (spend.limitText.map { " of \($0)" } ?? ""))
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer(minLength: 0)
+                    StalenessLabel(account: account, now: now)
+                }
             }
         }
-        .padding(12)
-        .background(.quinary, in: .rect(cornerRadius: 10))
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panel()
     }
 }
 

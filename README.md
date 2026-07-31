@@ -89,12 +89,37 @@ The same widget also appears in Notification Centre (swipe in from the right edg
 Keep the app running — or tick **Launch at login** in its window — so the snapshot the
 widget reads stays current.
 
+## Design
+
+The visual language is a precision instrument cluster: a graphite dial, a luminous scale
+that runs cool → hot as headroom disappears, and light that comes off the reading rather
+than off the panel. Cool means room to spare, heat means you're running out — one
+continuous ramp instead of three flat traffic-light states.
+
+The scale (`Dial.scale`) is aqua `#46E0B8` → citrus `#FFD166` → ember `#FF8A5B` → crimson
+`#FF4D6D`, laid around a 270° sweep with the gap at the bottom. The arc is a real `Shape`
+rather than a rotated, trimmed `Circle`, so the angular gradient lines up with actual
+screen angles instead of drifting with the rotation.
+
+### The pace marker
+
+A speedometer measures rate, and so does this. A quota bar can tell you how much you've
+spent but not whether that's *fast*. Because we know both the percentage and when the
+window closes, we know how far through the window you are — and therefore where an even
+burn would have put you by now. The tick on the dial marks that point:
+
+- Fill **short of** the tick → `under pace`, cruising
+- Fill **past** the tick → `over pace`, you'll run out early
+
+This is the one piece of information here that a plain progress bar cannot express, and
+it comes free from data already on disk (`Pace` in `Shared/UsageDesign.swift`).
+
 ## Layouts
 
 | Family | Shows |
 | --- | --- |
-| Small | Headline % per account plus hairline session/weekly bars |
-| Medium | One column per account: session + weekly bars, reset countdowns, staleness |
+| Small | A dial per account, weekly folded into the inner ring, weekly % beneath |
+| Medium | One full-width row per account: dial, weekly meter, pace, staleness |
 | Large | Everything, including per-model weekly limits and extra-usage spend |
 
 ## Previewing without installing
@@ -103,8 +128,13 @@ widget reads stays current.
 dark, using your actual snapshot if one exists:
 
 ```bash
-./Tools/render.sh          # → build/previews/*.png
+./Tools/render.sh                                    # → build/previews/*.png
+build/previews/render-previews build/previews --stress   # → stress-*.png
 ```
+
+`--stress` renders synthetic data instead: a dial at 94% burning over pace, a weekly
+limit at 68%, and a window that has already rolled over. Real usage tends to sit at the
+cool end of the scale, so without this the hot half of the design never gets reviewed.
 
 This works because the layouts live in `Shared/UsageWidgetViews.swift` rather than in the
 widget target, and each takes its "now" as a parameter — WidgetKit renders timeline
