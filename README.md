@@ -91,35 +91,60 @@ widget reads stays current.
 
 ## Design
 
-The visual language is a precision instrument cluster: a graphite dial, a luminous scale
-that runs cool → hot as headroom disappears, and light that comes off the reading rather
-than off the panel. Cool means room to spare, heat means you're running out — one
-continuous ramp instead of three flat traffic-light states.
+One reading per account, large, on an open face. The dial is a 270° sweep with the gap at
+the bottom; the arc is thick enough to carry a gradient, and everything else — labels,
+countdowns, separators — is deliberately quiet so the number is the only thing competing
+for attention. No cards inside the widgets: a card drawn on a widget is a box inside a
+box, and its border ends up fighting the dial. Accounts are separated by space and a
+hairline instead.
 
-The scale (`Dial.scale`) is aqua `#46E0B8` → citrus `#FFD166` → ember `#FF8A5B` → crimson
-`#FF4D6D`, laid around a 270° sweep with the gap at the bottom. The arc is a real `Shape`
-rather than a rotated, trimmed `Circle`, so the angular gradient lines up with actual
-screen angles instead of drifting with the rotation.
+The arc is a real `Shape` rather than a rotated, trimmed `Circle`, so its angular gradient
+lines up with actual screen angles instead of drifting with the rotation.
 
-### The pace marker
+### Colour
+
+Hue carries severity; the gradient along each arc carries depth. `Dial.arcEnds` returns a
+lighter shade where the arc starts and a saturated one at its tip, so the sweep always
+looks designed rather than like a temperature readout.
+
+The scale is defined twice. Luminous accents look superb on graphite and wash out to
+nothing on white, so the light scheme gets its own deeper ramp rather than the dark one at
+reduced opacity:
+
+| | calm | warm | hot | critical |
+| --- | --- | --- | --- | --- |
+| Dark | `#3BE8B0` | `#FFC66B` | `#FF8A6B` | `#FF5C7A` |
+| Light | `#08A37B` | `#C98A12` | `#D4541F` | `#C81E45` |
+
+Text greys are explicit (`Dial.label`, `Dial.meta`) rather than the system `.secondary` /
+`.tertiary` hierarchy, which is far too faint on a light background at the 8–9pt sizes
+this widget is mostly made of.
+
+### The pace reference
 
 A speedometer measures rate, and so does this. A quota bar can tell you how much you've
 spent but not whether that's *fast*. Because we know both the percentage and when the
 window closes, we know how far through the window you are — and therefore where an even
-burn would have put you by now. The tick on the dial marks that point:
+burn would have put you by now. That point is drawn as a thin arc inset inside the main
+band:
 
-- Fill **short of** the tick → `under pace`, cruising
-- Fill **past** the tick → `over pace`, you'll run out early
+- Reference arc **longer** than the reading → `under pace`, cruising
+- Reference arc **swallowed** by it → `over pace`, you'll run out early
 
-This is the one piece of information here that a plain progress bar cannot express, and
-it comes free from data already on disk (`Pace` in `Shared/UsageDesign.swift`).
+Two earlier attempts are worth recording as dead ends. Drawn as a tick on the ring it read
+as a broken needle. Drawn at full band width it read as the *value* — the eye takes the
+longest arc for the reading, which at low usage says the opposite of the truth. Thin and
+inset, it stays a reference.
+
+This is the one thing here a plain progress bar cannot express, and it comes free from
+data already on disk (`Pace` in `Shared/UsageDesign.swift`).
 
 ## Layouts
 
 | Family | Shows |
 | --- | --- |
-| Small | A dial per account, weekly folded into the inner ring, weekly % beneath |
-| Medium | One full-width row per account: dial, weekly meter, pace, staleness |
+| Small | A dial per account with the weekly figure beneath |
+| Medium | Two large dials side by side, split by a hairline |
 | Large | Everything, including per-model weekly limits and extra-usage spend |
 
 ## Previewing without installing

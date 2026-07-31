@@ -2,79 +2,80 @@ import SwiftUI
 
 // MARK: - Design tokens
 //
-// The visual language is a precision instrument cluster: a graphite dial, a scale that
-// runs cool → hot as headroom disappears, and light coming off the reading rather than
-// off the panel. Cool means room to spare; heat means you're running out.
+// The face of a real instrument: a graduated rim, a thick gradient arc with a lit knob
+// riding its tip, and panels with enough depth to sit under the dial rather than behind
+// it. Hairline strokes and flat grey fills read as monitoring software; weight, depth
+// and a single point of light read as a device.
 //
-// The scale is defined twice. Luminous mint reads beautifully on graphite and washes out
-// to nothing on white, so the light scheme gets its own deeper, more saturated ramp
-// rather than the dark one at reduced opacity.
+// The scale is defined twice. Luminous accents look superb on graphite and wash out to
+// nothing on white, so the light scheme gets its own deeper ramp rather than the dark
+// one at reduced opacity.
 
 enum Dial {
     typealias RGB = (r: Double, g: Double, b: Double)
 
-    /// Dark scheme: luminous, as if lit from behind.
+    /// Dark scheme: lit from behind.
     private static let darkScale: [(at: Double, color: RGB)] = [
-        (0.00, (0.275, 0.878, 0.722)),  // aqua    #46E0B8
-        (0.50, (1.000, 0.820, 0.400)),  // citrus  #FFD166
-        (0.80, (1.000, 0.541, 0.357)),  // ember   #FF8A5B
-        (1.00, (1.000, 0.302, 0.427)),  // crimson #FF4D6D
+        (0.00, (0.231, 0.910, 0.690)),  // mint    #3BE8B0
+        (0.45, (1.000, 0.776, 0.420)),  // amber   #FFC66B
+        (0.75, (1.000, 0.541, 0.420)),  // coral   #FF8A6B
+        (1.00, (1.000, 0.361, 0.478)),  // rose    #FF5C7A
     ]
 
     /// Light scheme: the same hues taken down into ink, so they hold on near-white.
     private static let lightScale: [(at: Double, color: RGB)] = [
-        (0.00, (0.043, 0.588, 0.478)),  // deep teal   #0B967A
-        (0.50, (0.729, 0.478, 0.020)),  // dark amber  #BA7A05
-        (0.80, (0.816, 0.318, 0.106)),  // burnt ember #D0511B
-        (1.00, (0.749, 0.098, 0.239)),  // deep crimson #BF193D
+        (0.00, (0.031, 0.639, 0.482)),  // deep teal   #08A37B
+        (0.45, (0.788, 0.541, 0.071)),  // dark amber  #C98A12
+        (0.75, (0.831, 0.329, 0.122)),  // burnt ember #D4541F
+        (1.00, (0.784, 0.118, 0.271)),  // deep rose   #C81E45
     ]
 
     static func scale(_ scheme: ColorScheme) -> [(at: Double, color: RGB)] {
         scheme == .dark ? darkScale : lightScale
     }
 
-    private static func swatch(_ c: RGB) -> Color {
+    static func swatch(_ c: RGB) -> Color {
         Color(.sRGB, red: c.r, green: c.g, blue: c.b)
     }
 
-    /// The colour at a point on the scale, interpolated between stops.
-    static func color(at fraction: Double, _ scheme: ColorScheme) -> Color {
+    /// Blend a colour toward white (positive) or black (negative).
+    static func mix(_ c: RGB, toward target: Double, by amount: Double) -> RGB {
+        (r: c.r + (target - c.r) * amount,
+         g: c.g + (target - c.g) * amount,
+         b: c.b + (target - c.b) * amount)
+    }
+
+    /// The raw colour at a point on the scale, interpolated between stops.
+    static func rgb(at fraction: Double, _ scheme: ColorScheme) -> RGB {
         let stops = scale(scheme)
         let f = min(1, max(0, fraction))
 
         guard let upperIndex = stops.firstIndex(where: { $0.at >= f }) else {
-            return swatch(stops[stops.count - 1].color)
+            return stops[stops.count - 1].color
         }
-        guard upperIndex > 0 else { return swatch(stops[0].color) }
+        guard upperIndex > 0 else { return stops[0].color }
 
         let lower = stops[upperIndex - 1], upper = stops[upperIndex]
         let span = upper.at - lower.at
         let t = span <= 0 ? 0 : (f - lower.at) / span
-        return Color(
-            .sRGB,
-            red: lower.color.r + (upper.color.r - lower.color.r) * t,
-            green: lower.color.g + (upper.color.g - lower.color.g) * t,
-            blue: lower.color.b + (upper.color.b - lower.color.b) * t
-        )
+        return (r: lower.color.r + (upper.color.r - lower.color.r) * t,
+                g: lower.color.g + (upper.color.g - lower.color.g) * t,
+                b: lower.color.b + (upper.color.b - lower.color.b) * t)
     }
 
-    static func gradient(_ scheme: ColorScheme) -> AngularGradient {
-        let stops = scale(scheme)
-        var gradientStops = stops.map {
-            Gradient.Stop(color: swatch($0.color), location: $0.at * sweepFraction)
-        }
-        // Run the scale back to its starting hue across the dial's blind spot at the
-        // bottom. Without this the gradient seam sits exactly on the start angle, and
-        // the round line cap — which overhangs it — picks up the hot end of the scale,
-        // painting a red tip on an arc that has barely moved.
-        gradientStops.append(.init(color: swatch(stops[0].color), location: 1))
+    static func color(at fraction: Double, _ scheme: ColorScheme) -> Color {
+        swatch(rgb(at: fraction, scheme))
+    }
 
-        return AngularGradient(
-            gradient: Gradient(stops: gradientStops),
-            center: .center,
-            startAngle: .degrees(startDegrees),
-            endAngle: .degrees(startDegrees + 360)
-        )
+    /// The two ends of a single arc's sweep — lighter where it starts, saturated at the
+    /// tip. A designed gradient rather than a temperature ramp: the hue carries severity,
+    /// the gradient carries depth.
+    static func arcEnds(at fraction: Double, _ scheme: ColorScheme) -> (start: Color, tip: Color) {
+        let base = rgb(at: fraction, scheme)
+        if scheme == .dark {
+            return (swatch(mix(base, toward: 1, by: 0.34)), swatch(base))
+        }
+        return (swatch(mix(base, toward: 1, by: 0.22)), swatch(mix(base, toward: 0, by: 0.12)))
     }
 
     /// A 270° sweep with the gap at the bottom — the open-bottom face of a rev counter.
@@ -85,49 +86,42 @@ enum Dial {
     // Explicit greys rather than the system hierarchy: `.tertiary` on a light background
     // is far too faint for 8pt type, which is most of what this widget is made of.
     static func track(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? .white.opacity(0.10) : .black.opacity(0.09)
+        scheme == .dark ? .white.opacity(0.07) : .black.opacity(0.06)
     }
 
-    /// The pace ghost — where an even burn would have reached. Sits above the track,
-    /// below the live arc.
-    static func ghost(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? .white.opacity(0.20) : .black.opacity(0.17)
+    static func graduation(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? .white.opacity(0.16) : .black.opacity(0.14)
     }
 
-    /// Small-caps field labels.
     static func label(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? .white.opacity(0.62) : .black.opacity(0.58)
+        scheme == .dark ? .white.opacity(0.60) : .black.opacity(0.56)
     }
 
-    /// Countdowns, timestamps, units — quieter than a label but still legible.
     static func meta(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? .white.opacity(0.48) : .black.opacity(0.45)
+        scheme == .dark ? .white.opacity(0.44) : .black.opacity(0.42)
     }
 
     /// A window that has rolled over: present, but carrying no live reading.
     static func idle(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? .white.opacity(0.35) : .black.opacity(0.32)
+        scheme == .dark ? .white.opacity(0.32) : .black.opacity(0.30)
     }
 
-    /// Glow is a dark-scheme effect. On white it turns into grey mud, so it's dialled
-    /// most of the way down rather than off — just enough to soften the arc's edge.
-    static func glowOpacity(_ scheme: ColorScheme) -> Double {
-        scheme == .dark ? 0.55 : 0.22
+    /// Depth under the arc, not a halo around it — a wide soft glow reads as smudge.
+    static func glow(_ scheme: ColorScheme) -> Double {
+        scheme == .dark ? 0.5 : 0.14
     }
 }
 
-/// The arc itself. A real `Shape` rather than a rotated, trimmed `Circle` so that the
-/// angular gradient lines up with actual screen angles instead of drifting with the
-/// rotation.
+/// The arc itself. A real `Shape` rather than a rotated, trimmed `Circle` so the angular
+/// gradient lines up with actual screen angles instead of drifting with the rotation.
 struct ArcShape: Shape {
     var fraction: Double
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let radius = min(rect.width, rect.height) / 2
         path.addArc(
             center: CGPoint(x: rect.midX, y: rect.midY),
-            radius: radius,
+            radius: min(rect.width, rect.height) / 2,
             startAngle: .degrees(Dial.startDegrees),
             endAngle: .degrees(Dial.startDegrees + Dial.sweepDegrees * min(1, max(0, fraction))),
             clockwise: false
@@ -143,12 +137,11 @@ struct ArcShape: Shape {
 // closes, we know how far through the window you are — and therefore where an even burn
 // would have put you by now.
 //
-// It's drawn as a second, dimmed arc rather than a mark on the ring: comparing two arc
-// lengths is immediate, whereas a lone tick floating off the fill just reads as a
-// broken needle.
+// It's drawn as a second, dimmed arc set inside the live one. Comparing two arc lengths
+// is immediate, and it keeps the face clean — a tick sitting off the end of the fill
+// reads as debris whether or not there's a scale behind it.
 
 struct Pace {
-    /// Where an even burn would sit right now, 0–1.
     var expected: Double
     var actual: Double
 
@@ -186,18 +179,15 @@ struct DialGauge: View {
     var now: Date
     var size: CGFloat
     var caption: String
-    /// Optional second, inset ring — used to fold the weekly window into the same dial.
-    var innerPercent: Int?
-    var innerResetsAt: Date?
 
     @Environment(\.colorScheme) private var scheme
 
-    private var lineWidth: CGFloat { max(4, size * 0.085) }
-    private var innerLineWidth: CGFloat { max(2, size * 0.042) }
-    private var inset: CGFloat { lineWidth * 1.9 }
+    /// Thick enough to have presence. A hairline ring reads as a chart, not a reading.
+    private var lineWidth: CGFloat { max(5, size * 0.115) }
 
-    /// Below this the centre can't carry a third line legibly.
     private var showsCountdown: Bool { size >= 84 }
+    /// Below this the inset reference arc is too fine to read.
+    private var showsPace: Bool { size >= 74 }
 
     /// The cached window has already rolled over, so this figure is history.
     private var isExpired: Bool {
@@ -206,11 +196,26 @@ struct DialGauge: View {
     }
 
     private var fraction: Double { min(1, max(0, Double(percent) / 100)) }
-    private var accent: Color {
-        isExpired ? Dial.idle(scheme) : Dial.color(at: fraction, scheme)
-    }
+    private var ends: (start: Color, tip: Color) { Dial.arcEnds(at: fraction, scheme) }
     private var pace: Pace? {
         isExpired ? nil : Pace(percent: percent, resetsAt: resetsAt, window: window, now: now)
+    }
+
+    /// Stops laid so the gradient spans exactly the drawn arc, then returns to the
+    /// starting hue across the dial's blind spot. Without that return the seam sits on
+    /// the start angle and the round cap — which overhangs it — picks up the far end.
+    private var arcGradient: AngularGradient {
+        let tipLocation = max(0.02, fraction * Dial.sweepFraction)
+        return AngularGradient(
+            gradient: Gradient(stops: [
+                .init(color: ends.start, location: 0),
+                .init(color: ends.tip, location: tipLocation),
+                .init(color: ends.start, location: 1),
+            ]),
+            center: .center,
+            startAngle: .degrees(Dial.startDegrees),
+            endAngle: .degrees(Dial.startDegrees + 360)
+        )
     }
 
     var body: some View {
@@ -218,37 +223,20 @@ struct DialGauge: View {
             ArcShape(fraction: 1)
                 .stroke(Dial.track(scheme), style: .init(lineWidth: lineWidth, lineCap: .round))
 
-            // Inner ring — the weekly window, when folded in.
-            if let innerPercent {
-                let innerExpired = innerResetsAt.map { $0 <= now } ?? false
-                ArcShape(fraction: 1)
-                    .stroke(Dial.track(scheme),
-                            style: .init(lineWidth: innerLineWidth, lineCap: .round))
-                    .padding(inset)
-                ArcShape(fraction: Double(innerPercent) / 100)
-                    .stroke(
-                        innerExpired ? Dial.idle(scheme)
-                                     : Dial.color(at: Double(innerPercent) / 100, scheme),
-                        style: .init(lineWidth: innerLineWidth, lineCap: .round)
-                    )
-                    .padding(inset)
-            }
-
-            // The pace ghost. Longer than the live arc → you're under pace; swallowed by
-            // it → you're over.
-            if let pace, pace.expected > 0.01 {
+            // The pace reference, as a thin arc inset inside the main band. Drawn at
+            // full width it competes with the reading — the eye takes the longest arc
+            // for the value, which at low usage says the opposite of the truth.
+            if showsPace, let pace, pace.expected > 0.01 {
                 ArcShape(fraction: pace.expected)
-                    .stroke(Dial.ghost(scheme),
-                            style: .init(lineWidth: lineWidth, lineCap: .round))
+                    .stroke(Dial.graduation(scheme), style: .init(lineWidth: 2.5, lineCap: .round))
+                    .padding(lineWidth * 0.5 + 3.5)
             }
 
-            // The live reading. Light comes off this, not off the panel.
             if !isExpired && percent > 0 {
                 ArcShape(fraction: fraction)
-                    .stroke(Dial.gradient(scheme),
-                            style: .init(lineWidth: lineWidth, lineCap: .round))
-                    .shadow(color: accent.opacity(Dial.glowOpacity(scheme)),
-                            radius: lineWidth * 0.85)
+                    .stroke(arcGradient, style: .init(lineWidth: lineWidth, lineCap: .round))
+                    // Tight and low: depth under the arc, not a halo around it.
+                    .shadow(color: ends.tip.opacity(Dial.glow(scheme)), radius: lineWidth * 0.32)
             }
 
             readout
@@ -260,33 +248,34 @@ struct DialGauge: View {
         VStack(spacing: 0) {
             if isExpired {
                 Text("—")
-                    .font(.system(size: size * 0.28, weight: .medium, design: .rounded))
+                    .font(.system(size: size * 0.26, weight: .medium, design: .rounded))
                     .foregroundStyle(Dial.idle(scheme))
                 Text("reset")
-                    .font(.system(size: max(7, size * 0.095), weight: .semibold))
+                    .font(.system(size: max(7, size * 0.092), weight: .semibold))
                     .tracking(0.6)
                     .foregroundStyle(Dial.meta(scheme))
             } else {
-                HStack(alignment: .top, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
                     Text("\(percent)")
-                        .font(.system(size: size * 0.30, weight: .semibold, design: .rounded)
+                        .font(.system(size: size * 0.34, weight: .bold, design: .rounded)
                             .monospacedDigit())
+                        .tracking(-size * 0.012)
                     Text("%")
-                        .font(.system(size: size * 0.15, weight: .semibold, design: .rounded))
-                        .padding(.top, size * 0.035)
+                        .font(.system(size: size * 0.145, weight: .bold, design: .rounded))
+                        .baselineOffset(size * 0.015)
                 }
-                .foregroundStyle(accent)
+                .foregroundStyle(ends.tip)
 
                 Text(caption)
-                    .font(.system(size: max(7, size * 0.095), weight: .semibold))
-                    .tracking(0.8)
+                    .font(.system(size: max(7, size * 0.092), weight: .bold))
+                    .tracking(0.9)
                     .foregroundStyle(Dial.label(scheme))
+                    .padding(.top, size * 0.012)
 
                 if showsCountdown, let left = UsageFormat.countdown(to: resetsAt, from: now) {
                     Text(left)
-                        .font(.system(size: max(7, size * 0.088)).monospacedDigit())
+                        .font(.system(size: max(7, size * 0.085)).monospacedDigit())
                         .foregroundStyle(Dial.meta(scheme))
-                        .padding(.top, 1)
                 }
             }
         }
@@ -309,16 +298,16 @@ struct MiniMeter: View {
         return resetsAt <= now
     }
 
-    private var accent: Color {
-        isExpired ? Dial.idle(scheme) : Dial.color(at: Double(percent) / 100, scheme)
+    private var ends: (start: Color, tip: Color) {
+        Dial.arcEnds(at: Double(percent) / 100, scheme)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
                 Text(title.uppercased())
                     .font(.system(size: 8.5, weight: .bold))
-                    .tracking(0.7)
+                    .tracking(0.9)
                     .foregroundStyle(Dial.label(scheme))
                     .lineLimit(1)
                 Spacer(minLength: 2)
@@ -328,8 +317,8 @@ struct MiniMeter: View {
                         .foregroundStyle(Dial.meta(scheme))
                 } else {
                     Text("\(percent)%")
-                        .font(.system(size: 10.5, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(accent)
+                        .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(ends.tip)
                     if let reset = UsageFormat.countdown(to: resetsAt, from: now) {
                         Text(reset)
                             .font(.system(size: 9).monospacedDigit())
@@ -341,14 +330,16 @@ struct MiniMeter: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Dial.track(scheme))
-                    Capsule()
-                        .fill(accent)
-                        .frame(width: geo.size.width * min(1, max(0, Double(percent) / 100)))
-                        .shadow(color: isExpired ? .clear : accent.opacity(Dial.glowOpacity(scheme)),
-                                radius: 3)
+                    if !isExpired && percent > 0 {
+                        Capsule()
+                            .fill(LinearGradient(colors: [ends.start, ends.tip],
+                                                 startPoint: .leading, endPoint: .trailing))
+                            .frame(width: max(5, geo.size.width * min(1, Double(percent) / 100)))
+                            .shadow(color: ends.tip.opacity(Dial.glow(scheme)), radius: 3)
+                    }
                 }
             }
-            .frame(height: 3.5)
+            .frame(height: 5)
         }
     }
 }
@@ -361,15 +352,16 @@ struct AccountHeader: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(account.label)
-                .font(.system(size: size, weight: .semibold))
+                .font(.system(size: size, weight: .bold))
+                .tracking(-0.2)
                 .lineLimit(1)
             Text(account.plan.uppercased())
-                .font(.system(size: max(7, size * 0.62), weight: .bold))
-                .tracking(0.5)
+                .font(.system(size: max(7, size * 0.58), weight: .bold))
+                .tracking(0.6)
                 .foregroundStyle(Dial.label(scheme))
-                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                .padding(.horizontal, 5).padding(.vertical, 2)
                 .background(Dial.track(scheme), in: .capsule)
             Spacer(minLength: 0)
         }
@@ -401,32 +393,40 @@ struct StalenessLabel: View {
     }
 }
 
-/// Card surface for the larger layouts — a panel the dials sit on.
+/// Card surface for the app window.
 ///
-/// In the light scheme the panel is white and the page behind it is grey; a
-/// near-white-on-white panel with a hairline border disappears entirely.
+/// Deliberately not used inside the widgets: a card drawn on a widget is a box inside a
+/// box, and the extra border competes with the dial for attention. The widgets separate
+/// accounts with space and a hairline instead.
 struct PanelBackground: ViewModifier {
     @Environment(\.colorScheme) private var scheme
 
     func body(content: Content) -> some View {
         content
             .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(scheme == .dark ? Color.white.opacity(0.05) : Color.white)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(
-                                scheme == .dark ? Color.white.opacity(0.08)
-                                                : Color.black.opacity(0.07),
-                                lineWidth: 1
-                            )
-                    }
-                    .shadow(color: .black.opacity(scheme == .dark ? 0.32 : 0.10),
-                            radius: 7, y: 2)
+                    .shadow(color: .black.opacity(scheme == .dark ? 0.30 : 0.09),
+                            radius: 9, y: 3)
             }
     }
 }
 
 extension View {
     func panel() -> some View { modifier(PanelBackground()) }
+}
+
+/// Separator used between accounts inside the widgets.
+struct Hairline: View {
+    var axis: Axis = .horizontal
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let color = scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.08)
+        Rectangle()
+            .fill(color)
+            .frame(width: axis == .vertical ? 1 : nil,
+                   height: axis == .horizontal ? 1 : nil)
+    }
 }
