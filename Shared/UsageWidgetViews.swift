@@ -12,6 +12,8 @@ struct UsageSmallView: View {
     var snapshot: UsageSnapshot
     var now: Date
 
+    @Environment(\.colorScheme) private var scheme
+
     private var accounts: [AccountUsage] { Array(snapshot.accounts.prefix(2)) }
 
     var body: some View {
@@ -40,14 +42,14 @@ struct UsageSmallView: View {
                             Text("7D")
                                 .font(.system(size: 8, weight: .bold))
                                 .tracking(0.4)
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(Dial.label(scheme))
                             Text("\(weekly.percent)%")
-                                .font(.system(size: 9, weight: .semibold, design: .rounded)
+                                .font(.system(size: 9.5, weight: .bold, design: .rounded)
                                     .monospacedDigit())
                                 .foregroundStyle(
                                     weekly.resetsAt.map { $0 <= now } ?? false
-                                        ? Dial.idle
-                                        : Dial.color(at: Double(weekly.percent) / 100)
+                                        ? Dial.idle(scheme)
+                                        : Dial.color(at: Double(weekly.percent) / 100, scheme)
                                 )
                         }
                     }
@@ -88,7 +90,7 @@ struct UsageMediumView: View {
                             MiniMeter(title: "Weekly", percent: weekly.percent,
                                       resetsAt: weekly.resetsAt, now: now)
                         }
-                        PaceCaption(account: account, now: now)
+                        PaceCaption(account: account, now: now, includeReset: true)
                     }
                 }
                 .padding(.horizontal, 11)
@@ -159,6 +161,10 @@ struct UsageLargeView: View {
 private struct PaceCaption: View {
     var account: AccountUsage
     var now: Date
+    /// Medium is too tight for a countdown inside the dial, so it rides along here.
+    var includeReset: Bool = false
+
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         if let pace = Pace(percent: account.session?.percent ?? 0,
@@ -171,8 +177,15 @@ private struct PaceCaption: View {
                 Text(pace.caption)
                     .font(.system(size: 9, weight: .medium))
                     .lineLimit(1)
+                if includeReset,
+                   let left = UsageFormat.countdown(to: account.session?.resetsAt, from: now) {
+                    Text("· \(left)")
+                        .font(.system(size: 9).monospacedDigit())
+                        .foregroundStyle(Dial.meta(scheme))
+                        .lineLimit(1)
+                }
             }
-            .foregroundStyle(pace.isAhead ? Dial.color(at: 0.85) : Color.secondary)
+            .foregroundStyle(pace.isAhead ? Dial.color(at: 0.85, scheme) : Dial.label(scheme))
         }
     }
 }

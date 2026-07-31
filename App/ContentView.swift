@@ -19,7 +19,9 @@ struct ContentView: View {
             }
             .padding(16)
         }
-        .background(.background)
+        // The panels are white in the light scheme, so the page behind them has to be
+        // grey or they vanish into it.
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
