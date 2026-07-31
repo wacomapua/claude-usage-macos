@@ -16,6 +16,14 @@ struct UsageSmallView: View {
 
     private var accounts: [AccountUsage] { Array(snapshot.accounts.prefix(2)) }
 
+    private var blooms: [Bloom] {
+        accounts.enumerated().map { index, account in
+            let x = accounts.count > 1 ? (index == 0 ? 0.26 : 0.74) : 0.5
+            return Bloom(percent: account.session?.percent ?? 0,
+                         anchor: UnitPoint(x: x, y: 0.3), radius: 150)
+        }
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             ForEach(accounts) { account in
@@ -49,6 +57,7 @@ struct UsageSmallView: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .bloomBackdrop(blooms)
     }
 }
 
@@ -60,6 +69,14 @@ struct UsageMediumView: View {
     @Environment(\.colorScheme) private var scheme
 
     private var accounts: [AccountUsage] { Array(snapshot.accounts.prefix(2)) }
+
+    private var blooms: [Bloom] {
+        accounts.enumerated().map { index, account in
+            let x = accounts.count > 1 ? (index == 0 ? 0.15 : 0.65) : 0.2
+            return Bloom(percent: account.session?.percent ?? 0,
+                         anchor: UnitPoint(x: x, y: 0.55), radius: 190)
+        }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -105,6 +122,7 @@ struct UsageMediumView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
+        .bloomBackdrop(blooms)
     }
 }
 
@@ -116,6 +134,14 @@ struct UsageLargeView: View {
     @Environment(\.colorScheme) private var scheme
 
     private var accounts: [AccountUsage] { Array(snapshot.accounts.prefix(2)) }
+
+    private var blooms: [Bloom] {
+        accounts.enumerated().map { index, account in
+            let y = accounts.count > 1 ? (index == 0 ? 0.24 : 0.76) : 0.5
+            return Bloom(percent: account.session?.percent ?? 0,
+                         anchor: UnitPoint(x: 0.16, y: y), radius: 260)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -174,6 +200,7 @@ struct UsageLargeView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
         }
+        .bloomBackdrop(blooms)
     }
 }
 

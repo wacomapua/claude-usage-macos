@@ -256,14 +256,23 @@ struct DialGauge: View {
         )
     }
 
+    /// The bright core inside the channel. Kept well under the band width — the
+    /// whole effect depends on the halo reading as the *channel* and this as the
+    /// light travelling through it.
+    private var filamentWidth: CGFloat { lineWidth * 0.34 }
+
     var body: some View {
         ZStack {
+            // The empty channel.
+            ArcShape(fraction: 1)
+                .stroke(Dial.track(scheme), style: .init(lineWidth: lineWidth, lineCap: .round))
+
             // The scale. A tachometer shows its whole range, not just the needle —
             // the unfilled arc carries the full cool-to-hot ramp at low opacity so
             // the face reads as an instrument even at 6%.
             ArcShape(fraction: 1)
                 .stroke(Dial.scaleGradient(scheme), style: .init(lineWidth: lineWidth, lineCap: .round))
-                .opacity(scheme == .dark ? 0.20 : 0.16)
+                .opacity(scheme == .dark ? 0.22 : 0.18)
 
             // The redline. Where the scale stops being advisory.
             ArcShape(fraction: 1)
@@ -282,10 +291,18 @@ struct DialGauge: View {
             }
 
             if !isExpired && percent > 0 {
+                // Two passes make the reading a lit tube rather than a painted
+                // stroke: a wide soft flood the width of the channel, and a narrow
+                // filament burning at full strength down the middle of it.
                 ArcShape(fraction: fraction)
                     .stroke(arcGradient, style: .init(lineWidth: lineWidth, lineCap: .round))
-                    // Tight and low: depth under the arc, not a halo around it.
-                    .shadow(color: ends.tip.opacity(Dial.glow(scheme)), radius: lineWidth * 0.32)
+                    .opacity(scheme == .dark ? 0.34 : 0.28)
+                    .blur(radius: lineWidth * 0.18)
+
+                ArcShape(fraction: fraction)
+                    .stroke(arcGradient, style: .init(lineWidth: filamentWidth, lineCap: .round))
+                    .shadow(color: ends.tip.opacity(Dial.glow(scheme)), radius: lineWidth * 0.42)
+                    .shadow(color: ends.tip.opacity(Dial.glow(scheme) * 0.5), radius: lineWidth)
             }
 
             readout
@@ -404,28 +421,105 @@ struct BurnSparkline: View {
 
     private var peak: Int { max(1, buckets.map(\.tokens).max() ?? 1) }
 
+    /// Value at index, 0–1 against the peak.
+    private func share(_ index: Int) -> Double {
+        guard buckets.indices.contains(index) else { return 0 }
+        return Double(buckets[index].tokens) / Double(peak)
+    }
+
+    private func points(in size: CGSize) -> [CGPoint] {
+        let count = max(buckets.count, 2)
+        let step = size.width / CGFloat(count - 1)
+        // Leave a sliver of headroom so the peak's stroke isn't clipped.
+        let usable = size.height - 2
+        return (0..<count).map { index in
+            CGPoint(x: CGFloat(index) * step,
+                    y: size.height - 1 - usable * share(index))
+        }
+    }
+
     var body: some View {
         GeometryReader { geo in
-            let count = max(buckets.count, 1)
-            let gap: CGFloat = 1.5
-            let barWidth = max(2, (geo.size.width - gap * CGFloat(count - 1)) / CGFloat(count))
+            let pts = points(in: geo.size)
+            let accent = Dial.color(at: 0.35, scheme)
 
-            HStack(alignment: .bottom, spacing: gap) {
-                ForEach(Array(buckets.enumerated()), id: \.offset) { _, bucket in
-                    let share = Double(bucket.tokens) / Double(peak)
-                    // Idle hours still get a visible stub so the time axis reads
-                    // as continuous rather than as missing data.
-                    let barHeight = bucket.tokens == 0 ? 1.5 : max(2.5, geo.size.height * share)
-                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                        .fill(bucket.tokens == 0
-                              ? AnyShapeStyle(Dial.track(scheme))
-                              : AnyShapeStyle(Dial.color(at: 0.15 + share * 0.7, scheme)))
-                        .frame(width: barWidth, height: barHeight)
+            ZStack(alignment: .bottom) {
+                // Baseline, so an idle stretch reads as a floor rather than a gap.
+                Rectangle()
+                    .fill(Dial.track(scheme))
+                    .frame(height: 1)
+
+                // Filled area under the curve, fading out downward.
+                Path { path in
+                    guard let first = pts.first, let last = pts.last else { return }
+                    path.move(to: CGPoint(x: first.x, y: geo.size.height))
+                    for point in pts { path.addLine(to: point) }
+                    path.addLine(to: CGPoint(x: last.x, y: geo.size.height))
+                    path.closeSubpath()
                 }
+                .fill(LinearGradient(
+                    colors: [accent.opacity(scheme == .dark ? 0.55 : 0.40), accent.opacity(0)],
+                    startPoint: .top, endPoint: .bottom
+                ))
+
+                // The curve itself, lit.
+                Path { path in
+                    guard let first = pts.first else { return }
+                    path.move(to: first)
+                    for point in pts.dropFirst() { path.addLine(to: point) }
+                }
+                .stroke(accent, style: .init(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                .shadow(color: accent.opacity(scheme == .dark ? 0.7 : 0.2), radius: 3)
             }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
         }
         .frame(height: height)
+    }
+}
+
+/// One dial's worth of light in the room.
+struct Bloom: Hashable {
+    var percent: Int
+    var anchor: UnitPoint
+    var radius: CGFloat
+}
+
+/// A soft radial wash behind the whole widget, one source per dial, each tinted by
+/// its own reading.
+///
+/// The one deliberately atmospheric element: it lets the surface take on the mood of
+/// the numbers without putting saturated colour anywhere near the type. Kept under
+/// 15% so it reads as light rather than as a coloured background.
+///
+/// It has to sit at the widget root, not behind each account block. A radial
+/// gradient painted behind a block is clipped to that block's rectangle, and
+/// wherever it hasn't faded to zero by the edge you get a visible hard-edged box.
+/// At the root the only boundary is the widget's own rounded outline.
+struct BloomBackdrop: ViewModifier {
+    var blooms: [Bloom]
+
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        content.background {
+            ZStack {
+                ForEach(blooms, id: \.self) { bloom in
+                    let accent = Dial.color(at: Double(bloom.percent) / 100, scheme)
+                    RadialGradient(
+                        colors: [accent.opacity(scheme == .dark ? 0.16 : 0.10), accent.opacity(0)],
+                        center: bloom.anchor,
+                        startRadius: 0,
+                        endRadius: bloom.radius
+                    )
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+}
+
+extension View {
+    func bloomBackdrop(_ blooms: [Bloom]) -> some View {
+        modifier(BloomBackdrop(blooms: blooms))
     }
 }
 
@@ -545,14 +639,26 @@ struct StalenessLabel: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            if isStale {
-                Image(systemName: "clock.badge.exclamationmark").font(.system(size: 8))
+            if account.isLive {
+                // Live figures need no staleness caveat — say so, and say it in the
+                // calm end of the palette so it reads as reassurance, not alarm.
+                Circle()
+                    .fill(Dial.color(at: 0, scheme))
+                    .frame(width: 5, height: 5)
+                    .shadow(color: Dial.color(at: 0, scheme).opacity(0.8), radius: 3)
+                Text("live")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Dial.color(at: 0, scheme))
+            } else {
+                if isStale {
+                    Image(systemName: "clock.badge.exclamationmark").font(.system(size: 8))
+                }
+                Text(UsageFormat.age(of: account.fetchedAt, from: now))
+                    .font(.system(size: 9))
+                    .lineLimit(1)
+                    .foregroundStyle(isStale ? Dial.color(at: 0.8, scheme) : Dial.meta(scheme))
             }
-            Text(UsageFormat.age(of: account.fetchedAt, from: now))
-                .font(.system(size: 9))
-                .lineLimit(1)
         }
-        .foregroundStyle(isStale ? Dial.color(at: 0.8, scheme) : Dial.meta(scheme))
     }
 }
 

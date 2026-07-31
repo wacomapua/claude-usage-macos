@@ -62,6 +62,11 @@ struct AccountUsage: Codable, Hashable, Identifiable {
     /// Derived from the transcripts rather than the usage cache — see TokenStats.
     /// Defaulted so adding it didn't break every existing construction site.
     var stats: TokenStats? = nil
+    /// Directory holding this account's `projects/`. Differs from the config file's
+    /// location on a default install, so it can't be inferred from `id`.
+    var dataDirPath: String? = nil
+    /// True when these figures came from the API rather than the on-disk cache.
+    var isLive: Bool = false
 
     /// When the current 5-hour window opened, worked back from its reset time.
     /// Used to scope token totals to the same window the dial is showing.

@@ -11,35 +11,16 @@ import Foundation
 /// drops one field is far better than one that fails to decode at all.
 enum ClaudeConfigReader {
 
-    /// Finds every Claude Code config directory in the user's home folder.
-    static func discoverConfigDirectories() -> [URL] {
-        let fm = FileManager.default
-        let home = fm.homeDirectoryForCurrentUser
-        let entries = (try? fm.contentsOfDirectory(atPath: home.path)) ?? []
-
-        return entries
-            .filter { $0 == ".claude" || $0.hasPrefix(".claude-") }
-            .map { home.appendingPathComponent($0, isDirectory: true) }
-            .filter { dir in
-                var isDir: ObjCBool = false
-                guard fm.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else { return false }
-                return fm.fileExists(atPath: dir.appendingPathComponent(".claude.json").path)
-            }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
-    }
-
     /// Builds a full snapshot from every discovered account.
     static func buildSnapshot() -> UsageSnapshot {
-        let accounts = discoverConfigDirectories().compactMap { readAccount(at: $0) }
+        let accounts = AccountLocation.discoverAll().compactMap { readAccount(at: $0) }
         return UsageSnapshot(accounts: accounts, generatedAt: Date())
     }
 
-    /// Parses one config directory into an account. Returns nil only if the file is unreadable.
-    static func readAccount(at configDir: URL) -> AccountUsage? {
-        let dirName = configDir.lastPathComponent
-        let configFile = configDir.appendingPathComponent(".claude.json")
+    /// Parses one account's config file. Returns nil only if the file is unreadable.
+    static func readAccount(at location: AccountLocation) -> AccountUsage? {
         guard
-            let data = try? Data(contentsOf: configFile),
+            let data = try? Data(contentsOf: location.configFile),
             let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return nil }
 
@@ -51,9 +32,9 @@ enum ClaudeConfigReader {
             Date(timeIntervalSince1970: $0 / 1000)
         }
 
-        return AccountUsage(
-            id: dirName,
-            label: label(forDirectoryNamed: dirName),
+        var account = AccountUsage(
+            id: location.id,
+            label: location.label,
             email: oauth?["emailAddress"] as? String ?? "unknown account",
             plan: planDescription(from: oauth),
             fetchedAt: fetchedAt,
@@ -62,6 +43,26 @@ enum ClaudeConfigReader {
             scoped: scopedGauges(from: utilization),
             spend: spend(from: utilization?["spend"] as? [String: Any])
         )
+        account.dataDirPath = location.dataDir.path
+        return account
+    }
+
+    /// Applies a freshly fetched utilization payload over an account, replacing the
+    /// cached gauges. Shares the same parsers as the cache path — the server returns
+    /// the identical shape, which is why the cache is a verbatim copy of it.
+    static func applyLive(_ utilization: [String: Any], to account: inout AccountUsage,
+                          at date: Date = Date()) {
+        // The endpoint returns the utilization object itself; the cache nests it one
+        // level down. Accept either so the same parser serves both.
+        let payload = (utilization["utilization"] as? [String: Any]) ?? utilization
+
+        account.session = gauge(payload["five_hour"]) ?? account.session
+        account.weekly = gauge(payload["seven_day"]) ?? account.weekly
+        let scoped = scopedGauges(from: payload)
+        if !scoped.isEmpty { account.scoped = scoped }
+        if let spend = spend(from: payload["spend"] as? [String: Any]) { account.spend = spend }
+        account.fetchedAt = date
+        account.isLive = true
     }
 
     // MARK: - Field parsing

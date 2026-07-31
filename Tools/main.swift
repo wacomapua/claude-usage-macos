@@ -44,7 +44,22 @@ func stressSnapshot(now: Date) -> UsageSnapshot {
                 scoped: [ScopedGauge(name: "Opus", percent: 81,
                                      resetsAt: now.addingTimeInterval(3600 * 90))],
                 spend: Spend(usedMinor: 128_00, limitMinor: 200_00,
-                             currency: "USD", exponent: 2, enabled: true)
+                             currency: "USD", exponent: 2, enabled: true),
+                stats: TokenStats(
+                    sessionTokens: 412_000_000, sessionCost: 318.40,
+                    weekTokens: 2_100_000_000, weekCost: 4210,
+                    buckets: (0..<14).map { index in
+                        HourBucket(hour: now.addingTimeInterval(Double(index - 13) * 3600),
+                                   tokens: [4, 9, 3, 14, 22, 8, 31, 47, 29, 55, 71, 44, 88, 62][index] * 1_000_000,
+                                   cost: 0)
+                    },
+                    models: [ModelSlice(family: "Opus", tokens: 62),
+                             ModelSlice(family: "Fable", tokens: 24),
+                             ModelSlice(family: "Sonnet", tokens: 10),
+                             ModelSlice(family: "Haiku", tokens: 4)],
+                    topProject: "monorepo-api",
+                    messageCount: 31_842
+                )
             ),
             AccountUsage(
                 id: ".claude-stale", label: "Idle", email: "stale@example.com",
@@ -75,10 +90,10 @@ func main() {
     var snapshot = ClaudeConfigReader.buildSnapshot()
     if snapshot.accounts.isEmpty { snapshot = .placeholder }
 
-    let home = FileManager.default.homeDirectoryForCurrentUser
     for index in snapshot.accounts.indices {
         let account = snapshot.accounts[index]
-        let dir = home.appendingPathComponent(account.id, isDirectory: true)
+        guard let path = account.dataDirPath else { continue }
+        let dir = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: dir.path) else { continue }
         let started = Date()
         snapshot.accounts[index].stats = TranscriptScanner().scan(

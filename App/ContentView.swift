@@ -8,7 +8,7 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if monitor.snapshot.accounts.isEmpty {
-                    EmptyStateView(searchedDirectories: monitor.configDirectories)
+                    EmptyStateView(searchedDirectories: monitor.locations.map(\.dataDir))
                 } else {
                     ForEach(monitor.snapshot.accounts) { account in
                         AccountCard(account: account)
@@ -151,6 +151,25 @@ private struct FooterView: View {
 
             if let loginError {
                 Text(loginError).font(.caption2).foregroundStyle(.red)
+            }
+
+            Toggle("Live usage (reads your Keychain token)", isOn: $monitor.liveEnabled)
+                .font(.caption)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+
+            if monitor.liveEnabled {
+                if monitor.liveErrors.isEmpty {
+                    Text("Fetching straight from the API every 5 minutes — no waiting on the cache. Read-only: the token is never refreshed or written back, because refresh tokens rotate and spending one here could sign you out of the CLI.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(monitor.liveErrors.sorted(by: { $0.key < $1.key }), id: \.key) { id, message in
+                        Text("\(id): \(message)")
+                            .font(.caption2).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
 
             // The widget only sees what this app last wrote, so it stops updating if

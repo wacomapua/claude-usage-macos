@@ -6,6 +6,52 @@ and weekly limits, per-model weekly limits, and extra-usage spend.
 Built for a two-account setup (`~/.claude-personal` and `~/.claude-work`), but it
 discovers every account automatically, so any number works.
 
+## Account discovery
+
+Works with one account or several, and finds them without configuration. There are
+**two different on-disk layouts**, and they are not the same shape:
+
+| Install | Config file | Data directory |
+| --- | --- | --- |
+| Default (no `CLAUDE_CONFIG_DIR`) | `~/.claude.json` | `~/.claude/` |
+| `CLAUDE_CONFIG_DIR=~/.claude-work` | `~/.claude-work/.claude.json` | `~/.claude-work/` |
+
+The default install keeps its config **beside** the data directory, not inside it.
+An earlier version only looked for `<dir>/.claude.json`, so it silently found nothing
+on a plain single-account setup — the most common case of all.
+
+An account is only listed if it shows **evidence of use**: a `cachedUsageUtilization`
+block, or an `oauthAccount` plus a non-empty `projects/` directory. That keeps a
+leftover `~/.claude.json` — the kind left behind after switching to per-account
+directories — from showing up as a phantom third account.
+
+## Live usage (optional)
+
+Off by default. When enabled, the app skips the cache and asks the API directly, so
+the numbers stop depending on when Claude Code last ran.
+
+Claude Code stores each account's OAuth token in the login Keychain. The service name
+is `Claude Code-credentials`, suffixed with the first 8 hex characters of the SHA-256
+of `CLAUDE_CONFIG_DIR` when that's set — which is exactly what keeps several accounts'
+tokens apart on one machine:
+
+```
+~/.claude-personal  →  Claude Code-credentials-c017d112
+~/.claude-work      →  Claude Code-credentials-cb899d8d
+default install     →  Claude Code-credentials
+```
+
+With that token, `GET https://api.anthropic.com/api/oauth/usage` (plus
+`anthropic-beta: oauth-2025-04-20`) returns the same payload the cache is a verbatim
+copy of — so the identical parser serves both paths.
+
+**It is strictly read-only.** The app never writes to the Keychain and never refreshes
+an expired token. Refresh tokens rotate: spending one here could invalidate the copy
+Claude Code holds and sign you out of the CLI. An expired token falls back to the
+cached numbers, and Claude Code refreshes it itself next time it runs.
+
+macOS prompts once for Keychain access, since the item belongs to another app.
+
 ## Two data sources
 
 | Source | Gives | Freshness |
@@ -139,6 +185,25 @@ Everything else — labels, countdowns, separators — is deliberately quiet so 
 reading is the only thing competing for attention. No cards inside the widgets: a card
 drawn on a widget is a box inside a box, and its border ends up fighting the dial.
 Accounts are separated by space and a hairline instead.
+
+### The arc is a lit channel, not a stroke
+
+The reading is drawn twice: a wide soft flood the full width of the channel, and a
+narrow filament at ~34% of that width burning at full strength down the middle, with
+two shadow passes at different radii. The result reads as light travelling through a
+tube rather than as paint on a ring — and it's what lets the same component look calm
+at 17% and genuinely alarming at 94%.
+
+### Bloom
+
+A soft radial wash tinted by each dial's own reading sits behind the whole widget, so
+the surface takes on the mood of the numbers — cool green when idle, deep red when
+you're about to run out.
+
+It has to live at the **widget root**, not behind each account block. A radial
+gradient painted behind a block is clipped to that block's rectangle, and wherever it
+hasn't faded to zero by the edge you get a visible hard-edged box. At the root the
+only boundary is the widget's own rounded outline.
 
 Three palettes, kept deliberately separate so two different readings can't be confused:
 
