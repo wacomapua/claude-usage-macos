@@ -151,7 +151,7 @@ struct UsageLargeView: View {
                 HStack(alignment: .top, spacing: 14) {
                     // The left column is the readout — dial then figures, kept large.
                     // The qualifiers ride one horizontal line on the right.
-                    VStack(alignment: .leading, spacing: 7) {
+                    VStack(spacing: 7) {
                         DialGauge(
                             percent: account.session?.percent ?? 0,
                             resetsAt: account.session?.resetsAt,
@@ -160,19 +160,20 @@ struct UsageLargeView: View {
                             size: 86,
                             caption: "5H"
                         )
-                        .frame(maxWidth: .infinity)
 
                         StatReadout(
                             label: "Tokens 5h",
                             value: TokenFormat.compact(account.stats?.sessionTokens ?? 0),
-                            size: 16
+                            size: 16,
+                            alignment: .center
                         )
                         StatReadout(
                             label: "Value 5h",
                             value: TokenFormat.money(account.stats?.sessionCost ?? 0),
                             caption: "api",
                             tint: Dial.color(at: 0.5, scheme),
-                            size: 16
+                            size: 16,
+                            alignment: .center
                         )
                         Spacer(minLength: 0)
                     }

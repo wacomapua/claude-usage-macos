@@ -35,7 +35,7 @@ private struct AccountCard: View {
             // worth reading from across the desk. The short qualifiers that used to
             // sit here move to one horizontal line on the right, where they cost a
             // row instead of a whole column.
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(spacing: 12) {
                 DialGauge(
                     percent: account.session?.percent ?? 0,
                     resetsAt: account.session?.resetsAt,
@@ -44,17 +44,19 @@ private struct AccountCard: View {
                     size: 112,
                     caption: "5H"
                 )
-                .frame(maxWidth: .infinity)
 
                 if let stats = account.stats, !stats.isEmpty {
                     StatReadout(label: "Tokens 5h",
-                                value: TokenFormat.compact(stats.sessionTokens), size: 22)
+                                value: TokenFormat.compact(stats.sessionTokens),
+                                size: 22, alignment: .center)
                     StatReadout(label: "Value 5h",
                                 value: TokenFormat.money(stats.sessionCost),
-                                caption: "api", tint: .orange, size: 22)
+                                caption: "api", tint: .orange,
+                                size: 22, alignment: .center)
                     StatReadout(label: "Week",
                                 value: TokenFormat.money(stats.weekCost),
-                                caption: TokenFormat.compact(stats.weekTokens), size: 22)
+                                caption: TokenFormat.compact(stats.weekTokens),
+                                size: 22, alignment: .center)
                 }
                 Spacer(minLength: 0)
             }

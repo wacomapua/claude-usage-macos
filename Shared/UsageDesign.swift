@@ -709,11 +709,14 @@ struct StatReadout: View {
     var caption: String?
     var tint: Color?
     var size: CGFloat = 15
+    /// Centre these when they sit under a dial, so the column shares one axis with
+    /// it. Left-aligned figures beneath a centred dial line up with nothing.
+    var alignment: HorizontalAlignment = .leading
 
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: alignment, spacing: 1) {
             Text(label.uppercased())
                 .font(.system(size: 8, weight: .bold))
                 .tracking(0.8)
