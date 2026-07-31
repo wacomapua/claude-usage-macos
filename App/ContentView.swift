@@ -3,8 +3,22 @@ import ServiceManagement
 
 struct ContentView: View {
     @EnvironmentObject private var monitor: UsageMonitor
+    @ObservedObject private var preferences = AppPreferences.shared
 
     var body: some View {
+        if preferences.hasCompletedSetup {
+            main
+        } else {
+            ScrollView {
+                WelcomeView(preferences: preferences,
+                            locations: monitor.locations,
+                            emails: monitor.emails)
+            }
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+    }
+
+    private var main: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if monitor.snapshot.accounts.isEmpty {
@@ -192,8 +206,10 @@ private struct FooterView: View {
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack {
+            HStack(spacing: 8) {
                 Button("Refresh now") { monitor.refresh(force: true) }
+                    .controlSize(.small)
+                Button("Accounts & privacy…") { AppPreferences.shared.reopenSetup() }
                     .controlSize(.small)
                 Spacer()
             }

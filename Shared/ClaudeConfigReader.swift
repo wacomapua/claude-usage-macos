@@ -11,10 +11,32 @@ import Foundation
 /// drops one field is far better than one that fails to decode at all.
 enum ClaudeConfigReader {
 
-    /// Builds a full snapshot from every discovered account.
-    static func buildSnapshot() -> UsageSnapshot {
-        let accounts = AccountLocation.discoverAll().compactMap { readAccount(at: $0) }
+    /// Builds a snapshot from the given accounts.
+    static func buildSnapshot(locations: [AccountLocation], hideEmails: Bool = false) -> UsageSnapshot {
+        let accounts = locations.compactMap { location -> AccountUsage? in
+            guard var account = readAccount(at: location) else { return nil }
+            // Redaction happens here rather than in the views, so the address never
+            // reaches the snapshot the widget reads either.
+            if hideEmails { account.email = account.label }
+            return account
+        }
         return UsageSnapshot(accounts: accounts, generatedAt: Date())
+    }
+
+    /// Builds from every discovered account. Used by the preview harness.
+    static func buildSnapshot() -> UsageSnapshot {
+        buildSnapshot(locations: AccountLocation.discoverAll())
+    }
+
+    /// Just the signed-in address, for listing accounts before the user has agreed
+    /// to anything more than that.
+    static func email(at location: AccountLocation) -> String? {
+        guard
+            let data = try? Data(contentsOf: location.configFile),
+            let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+            let oauth = root["oauthAccount"] as? [String: Any]
+        else { return nil }
+        return oauth["emailAddress"] as? String
     }
 
     /// Parses one account's config file. Returns nil only if the file is unreadable.

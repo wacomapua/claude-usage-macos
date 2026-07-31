@@ -29,7 +29,20 @@ private final class ScannerBox: @unchecked Sendable {
 final class UsageMonitor: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot = .empty
     @Published private(set) var lastWriteSucceeded = true
+    /// Everything found on disk, whether or not the user included it.
     @Published private(set) var locations: [AccountLocation] = []
+    /// Signed-in address per account, for the first-run picker.
+    @Published private(set) var emails: [String: String] = [:]
+
+    private let preferences = AppPreferences.shared
+    private var preferenceObservers: Set<AnyCancellable> = []
+
+    /// Only the accounts the user chose. Everything that reads transcripts or
+    /// publishes data works from this list, never from `locations`.
+    private var activeLocations: [AccountLocation] {
+        guard preferences.hasCompletedSetup else { return [] }
+        return locations.filter { preferences.isEnabled($0.id) }
+    }
     @Published private(set) var snapshotPaths: [String] = []
     /// Per-account failure text from the last live fetch, if any.
     @Published private(set) var liveErrors: [String: String] = [:]
@@ -72,6 +85,20 @@ final class UsageMonitor: ObservableObject {
     private var liveBackoff: TimeInterval = 0
 
     init() {
+        // Any preference change alters what may be read, so re-evaluate immediately
+        // rather than waiting for the next poll.
+        for publisher in [
+            preferences.$hasCompletedSetup.map { _ in () }.eraseToAnyPublisher(),
+            preferences.$enabledAccountIDs.map { _ in () }.eraseToAnyPublisher(),
+            preferences.$hideEmails.map { _ in () }.eraseToAnyPublisher(),
+        ] {
+            publisher
+                .dropFirst()
+                .receive(on: RunLoop.main)
+                .sink { [weak self] in self?.refresh(force: true) }
+                .store(in: &preferenceObservers)
+        }
+
         refresh(force: true)
         timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -83,13 +110,26 @@ final class UsageMonitor: ObservableObject {
     /// Rebuilds the snapshot if any watched file changed (or `force` is set).
     func refresh(force: Bool = false) {
         locations = AccountLocation.discoverAll()
+        emails = Dictionary(uniqueKeysWithValues: locations.compactMap { location in
+            ClaudeConfigReader.email(at: location).map { (location.id, $0) }
+        })
+
+        // Before the user has chosen, read nothing further and leave nothing
+        // published. The clear is unconditional rather than guarded on "is there
+        // something stale?" — the guarded version depended on reading back what a
+        // previous run wrote, which is exactly the state that must not be trusted.
+        // An empty write every 15s costs nothing and only happens in this state.
+        guard !activeLocations.isEmpty else {
+            publish(UsageSnapshot(accounts: [], generatedAt: Date()))
+            return
+        }
 
         // macOS recreates an extension's container the first time it registers the
         // widget, which wipes whatever we put there. Without this check the snapshot
         // would stay missing until a config file happened to change.
         let snapshotMissing = SnapshotStore.writtenPaths().isEmpty
 
-        let current = Self.fingerprint(of: locations)
+        let current = Self.fingerprint(of: activeLocations) + "|\(preferences.hideEmails)"
         guard force || snapshotMissing || current != fingerprint else {
             scanTranscripts(force: false)
             fetchLive(force: false)
@@ -100,7 +140,8 @@ final class UsageMonitor: ObservableObject {
         // Carry forward everything the config file doesn't know about, so rebuilding
         // from disk doesn't blank out the token stats or drop back to cached gauges
         // until the next scan and fetch land.
-        var rebuilt = ClaudeConfigReader.buildSnapshot()
+        var rebuilt = ClaudeConfigReader.buildSnapshot(locations: activeLocations,
+                                                       hideEmails: preferences.hideEmails)
         let previous = Dictionary(uniqueKeysWithValues: snapshot.accounts.map { ($0.id, $0) })
         for index in rebuilt.accounts.indices {
             guard let old = previous[rebuilt.accounts[index].id] else { continue }
@@ -130,14 +171,14 @@ final class UsageMonitor: ObservableObject {
     // MARK: - Live fetch
 
     private func fetchLive(force: Bool) {
-        guard liveEnabled, !liveInFlight, !locations.isEmpty else { return }
+        guard liveEnabled, !liveInFlight, !activeLocations.isEmpty else { return }
         let now = Date()
         let wait = liveInterval + liveBackoff
         guard force || now.timeIntervalSince(lastLiveFetch) >= wait else { return }
         liveInFlight = true
         lastLiveFetch = now
 
-        let targets = locations.map { (id: $0.id, service: $0.keychainService) }
+        let targets = activeLocations.map { (id: $0.id, service: $0.keychainService) }
 
         Task { @MainActor in
             var payloads: [String: [String: Any]] = [:]

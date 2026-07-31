@@ -84,6 +84,25 @@ func main() {
     let outputDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "."
     let now = Date()
 
+    if CommandLine.arguments.contains("--welcome") {
+        // Render against a throwaway defaults domain so previewing the first-run
+        // screen can't flip the real app's stored choices.
+        let sandbox = UserDefaults(suiteName: "preview.welcome")!
+        sandbox.removePersistentDomain(forName: "preview.welcome")
+        let preferences = AppPreferences(defaults: sandbox)
+        let locations = AccountLocation.discoverAll()
+        let emails = Dictionary(uniqueKeysWithValues: locations.compactMap { location in
+            ClaudeConfigReader.email(at: location).map { (location.id, $0) }
+        })
+        for scheme in [ColorScheme.light, .dark] {
+            render(WelcomeView(preferences: preferences, locations: locations, emails: emails),
+                   size: CGSize(width: 560, height: 620),
+                   scheme: scheme,
+                   to: "\(outputDir)/welcome-\(scheme == .dark ? "dark" : "light").png")
+        }
+        return
+    }
+
     if CommandLine.arguments.contains("--stress") {
         renderAll(stressSnapshot(now: now), now: now, prefix: "stress", into: outputDir)
         return
