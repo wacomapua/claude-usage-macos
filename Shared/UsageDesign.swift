@@ -208,6 +208,139 @@ struct Pace {
     }
 }
 
+// MARK: - Projection
+//
+// Where the pace marker says "you're going fast", this says what that actually
+// costs you: run the current burn rate forward and see whether it reaches 100%
+// before the window resets. That's the question the dial can't answer on its own —
+// 60% is fine with twenty minutes to go and a problem with four hours to go.
+
+struct LimitProjection {
+    /// Hours from now until the limit is reached at the current rate.
+    var hoursToLimit: Double
+    /// Hours until the window resets on its own.
+    var hoursToReset: Double
+
+    /// True when the limit arrives before the reset does.
+    var willHit: Bool { hoursToLimit < hoursToReset }
+
+    var caption: String {
+        guard willHit else { return "clears first" }
+        return "\(UsageFormat.countdown(to: Date().addingTimeInterval(hoursToLimit * 3600)) ?? "—") to limit"
+    }
+
+    init?(percent: Int, resetsAt: Date?, window: TimeInterval, now: Date) {
+        guard let resetsAt, window > 0 else { return nil }
+        let remaining = resetsAt.timeIntervalSince(now)
+        guard remaining > 0, remaining <= window else { return nil }
+
+        let elapsed = window - remaining
+        // Too early in the window to extrapolate: a couple of minutes of activity
+        // would project wild numbers, and a confident wrong answer is worse than none.
+        guard elapsed >= 15 * 60, percent > 0 else { return nil }
+
+        let ratePerHour = Double(percent) / (elapsed / 3600)
+        guard ratePerHour > 0 else { return nil }
+
+        hoursToLimit = Double(100 - percent) / ratePerHour
+        hoursToReset = remaining / 3600
+    }
+}
+
+/// The projection, sized to sit under a dial.
+struct ProjectionBadge: View {
+    var account: AccountUsage
+    var now: Date
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        if let projection = LimitProjection(percent: account.session?.percent ?? 0,
+                                            resetsAt: account.session?.resetsAt,
+                                            window: LimitWindow.session,
+                                            now: now) {
+            let tint = projection.willHit ? Dial.color(at: 0.95, scheme) : Dial.meta(scheme)
+            HStack(spacing: 3) {
+                Image(systemName: projection.willHit ? "exclamationmark.triangle.fill" : "checkmark.circle")
+                    .font(.system(size: 8, weight: .bold))
+                Text(projection.caption)
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .foregroundStyle(tint)
+        }
+    }
+}
+
+/// Change against the same point yesterday.
+struct DeltaChip: View {
+    var stats: TokenStats?
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        if let delta = stats?.dayOverDay {
+            let up = delta >= 0
+            let magnitude = Int((abs(delta) * 100).rounded())
+            HStack(spacing: 2) {
+                Image(systemName: up ? "arrow.up.right" : "arrow.down.right")
+                    .font(.system(size: 7, weight: .bold))
+                Text("\(magnitude)%")
+                    .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
+                Text("vs yday")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Dial.meta(scheme))
+            }
+            .foregroundStyle(up ? Dial.color(at: 0.6, scheme) : Dial.color(at: 0, scheme))
+        }
+    }
+}
+
+/// The week's busiest working directories.
+struct TopProjects: View {
+    var projects: [ProjectSlice]
+    var limit: Int = 3
+
+    @Environment(\.colorScheme) private var scheme
+
+    private var shown: [ProjectSlice] { Array(projects.prefix(limit)) }
+    private var peak: Int { max(1, shown.first?.tokens ?? 1) }
+
+    var body: some View {
+        if !shown.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(shown) { project in
+                    HStack(spacing: 6) {
+                        Text(project.name)
+                            .font(.system(size: 9))
+                            .foregroundStyle(Dial.label(scheme))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(width: 96, alignment: .leading)
+
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Dial.track(scheme))
+                                Capsule()
+                                    .fill(Dial.color(at: 0.3, scheme))
+                                    .frame(width: max(3, geo.size.width
+                                                      * Double(project.tokens) / Double(peak)))
+                            }
+                        }
+                        .frame(height: 3)
+
+                        Text(TokenFormat.compact(project.tokens))
+                            .font(.system(size: 9).monospacedDigit())
+                            .foregroundStyle(Dial.meta(scheme))
+                            .frame(width: 38, alignment: .trailing)
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - The dial
 
 struct DialGauge: View {

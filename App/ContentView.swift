@@ -31,14 +31,23 @@ private struct AccountCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
-            DialGauge(
-                percent: account.session?.percent ?? 0,
-                resetsAt: account.session?.resetsAt,
-                window: LimitWindow.session,
-                now: now,
-                size: 112,
-                caption: "5H"
-            )
+            // Everything that qualifies the dial's number sits directly beneath it,
+            // where the eye already is.
+            VStack(spacing: 7) {
+                DialGauge(
+                    percent: account.session?.percent ?? 0,
+                    resetsAt: account.session?.resetsAt,
+                    window: LimitWindow.session,
+                    now: now,
+                    size: 112,
+                    caption: "5H"
+                )
+                PaceCaption(account: account, now: now)
+                ProjectionBadge(account: account, now: now)
+                DeltaChip(stats: account.stats)
+                Spacer(minLength: 0)
+            }
+            .frame(width: 124)
 
             VStack(alignment: .leading, spacing: 10) {
                 AccountHeader(account: account, size: 14)
@@ -76,6 +85,7 @@ private struct AccountCard: View {
                     }
                     BurnSparkline(buckets: stats.buckets, height: 26)
                     ModelMixBar(models: stats.models)
+                    TopProjects(projects: stats.projects)
                 }
 
                 HStack(spacing: 5) {
@@ -160,7 +170,7 @@ private struct FooterView: View {
 
             if monitor.liveEnabled {
                 if monitor.liveErrors.isEmpty {
-                    Text("Fetching straight from the API every 5 minutes — no waiting on the cache. Read-only: the token is never refreshed or written back, because refresh tokens rotate and spending one here could sign you out of the CLI.")
+                    Text("Fetching straight from the API every 60 seconds — no waiting on the cache. Read-only: the token is never refreshed or written back, because refresh tokens rotate and spending one here could sign you out of the CLI.")
                         .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {

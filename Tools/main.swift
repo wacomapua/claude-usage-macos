@@ -57,7 +57,11 @@ func stressSnapshot(now: Date) -> UsageSnapshot {
                              ModelSlice(family: "Fable", tokens: 24),
                              ModelSlice(family: "Sonnet", tokens: 10),
                              ModelSlice(family: "Haiku", tokens: 4)],
-                    topProject: "monorepo-api",
+                    projects: [ProjectSlice(name: "monorepo-api", tokens: 940_000_000),
+                               ProjectSlice(name: "web-dashboard", tokens: 610_000_000),
+                               ProjectSlice(name: "infra-terraform", tokens: 350_000_000)],
+                    todayTokens: 1_180_000_000,
+                    yesterdayTokens: 890_000_000,
                     messageCount: 31_842
                 )
             ),

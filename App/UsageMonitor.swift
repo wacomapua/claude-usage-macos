@@ -58,11 +58,18 @@ final class UsageMonitor: ObservableObject {
     private var scanInFlight = false
     private let scanInterval: TimeInterval = 60
 
-    /// Claude Code throttles its own usage refresh to once every 5 minutes; polling
-    /// the endpoint faster would return the same numbers.
+    /// Claude Code throttles writes to *its own cache* every 5 minutes, but that says
+    /// nothing about how often we may ask the API ourselves. A minute is ~1,440
+    /// requests a day per account.
+    ///
+    /// The endpoint is undocumented, so its rate limit is unknown — `liveBackoff`
+    /// doubles the interval on each 429 or 5xx (to a 30-minute ceiling) and resets on
+    /// the first success. An aggressive setting degrades instead of hammering.
     private var lastLiveFetch: Date = .distantPast
     private var liveInFlight = false
-    private let liveInterval: TimeInterval = 300
+    private let liveInterval: TimeInterval = 60
+    private let liveBackoffCeiling: TimeInterval = 1800
+    private var liveBackoff: TimeInterval = 0
 
     init() {
         refresh(force: true)
@@ -125,7 +132,8 @@ final class UsageMonitor: ObservableObject {
     private func fetchLive(force: Bool) {
         guard liveEnabled, !liveInFlight, !locations.isEmpty else { return }
         let now = Date()
-        guard force || now.timeIntervalSince(lastLiveFetch) >= liveInterval else { return }
+        let wait = liveInterval + liveBackoff
+        guard force || now.timeIntervalSince(lastLiveFetch) >= wait else { return }
         liveInFlight = true
         lastLiveFetch = now
 
@@ -134,13 +142,28 @@ final class UsageMonitor: ObservableObject {
         Task { @MainActor in
             var payloads: [String: [String: Any]] = [:]
             var errors: [String: String] = [:]
+            var throttled = false
 
             for target in targets {
                 do {
                     payloads[target.id] = try await LiveUsageFetcher.fetch(service: target.service)
                 } catch {
                     errors[target.id] = error.localizedDescription
+                    // Only a server pushing back should slow us down. A missing or
+                    // expired token is a permanent condition for this account and
+                    // retrying later at any interval won't fix it.
+                    if case LiveUsageFetcher.FetchError.http(let code) = error,
+                       code == 429 || code >= 500 {
+                        throttled = true
+                    }
                 }
+            }
+
+            if throttled {
+                liveBackoff = min(liveBackoffCeiling,
+                                  liveBackoff == 0 ? liveInterval : liveBackoff * 2)
+            } else if !payloads.isEmpty {
+                liveBackoff = 0
             }
 
             var updated = snapshot

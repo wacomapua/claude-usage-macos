@@ -58,6 +58,13 @@ struct ModelSlice: Codable, Hashable, Identifiable {
     var tokens: Int
 }
 
+/// Tokens attributable to one working directory.
+struct ProjectSlice: Codable, Hashable, Identifiable {
+    var id: String { name }
+    var name: String
+    var tokens: Int
+}
+
 /// Everything derived from the transcripts for one account.
 struct TokenStats: Codable, Hashable {
     /// Totals inside the account's current 5-hour session window.
@@ -70,11 +77,25 @@ struct TokenStats: Codable, Hashable {
     var buckets: [HourBucket] = []
     /// Output-token share per model family, largest first.
     var models: [ModelSlice] = []
-    /// Project directory with the most tokens this week.
-    var topProject: String?
+    /// Busiest working directories this week, largest first.
+    var projects: [ProjectSlice] = []
+    /// Tokens since local midnight, and over the same stretch of yesterday.
+    /// Compared like-for-like: yesterday is cut off at the same time of day, so a
+    /// morning check doesn't lose to a full day.
+    var todayTokens: Int = 0
+    var yesterdayTokens: Int = 0
     var messageCount: Int = 0
 
     var isEmpty: Bool { weekTokens == 0 }
+
+    var topProject: String? { projects.first?.name }
+
+    /// Change against the same point yesterday, as a fraction. Nil when yesterday
+    /// has nothing to compare against — a percentage off zero is meaningless.
+    var dayOverDay: Double? {
+        guard yesterdayTokens > 0 else { return nil }
+        return Double(todayTokens - yesterdayTokens) / Double(yesterdayTokens)
+    }
 }
 
 // MARK: - Scanner
@@ -284,7 +305,29 @@ final class TranscriptScanner {
             .filter { $0.tokens > 0 }
             .sorted { $0.tokens > $1.tokens }
 
-        stats.topProject = projectTokens.max { $0.value < $1.value }?.key
+        stats.projects = projectTokens
+            .map { ProjectSlice(name: $0.key, tokens: $0.value) }
+            .filter { $0.tokens > 0 }
+            .sorted { $0.tokens > $1.tokens }
+            .prefix(4)
+            .map { $0 }
+
+        // Today against the same stretch of yesterday. Both are measured from local
+        // midnight and cut off at the same elapsed point, so checking at 9am compares
+        // this morning with yesterday morning rather than with a whole day.
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: now)
+        let elapsed = now.timeIntervalSince(todayStart)
+        let yesterdayStart = todayStart.addingTimeInterval(-24 * 60 * 60)
+        let yesterdayCutoff = yesterdayStart.addingTimeInterval(elapsed)
+
+        for (hour, bucket) in merged {
+            if hour >= todayStart {
+                stats.todayTokens += bucket.tokens
+            } else if hour >= yesterdayStart && hour < yesterdayCutoff {
+                stats.yesterdayTokens += bucket.tokens
+            }
+        }
 
         return stats
     }

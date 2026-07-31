@@ -149,6 +149,8 @@ struct UsageLargeView: View {
                 if index > 0 { Hairline() }
 
                 HStack(alignment: .top, spacing: 14) {
+                    // The space under the dial is the best real estate in the layout:
+                    // directly beside the number it qualifies.
                     VStack(spacing: 5) {
                         DialGauge(
                             percent: account.session?.percent ?? 0,
@@ -159,7 +161,10 @@ struct UsageLargeView: View {
                             caption: "5H"
                         )
                         PaceCaption(account: account, now: now)
+                        ProjectionBadge(account: account, now: now)
+                        DeltaChip(stats: account.stats)
                     }
+                    .frame(width: 116)
 
                     VStack(alignment: .leading, spacing: 9) {
                         HStack(spacing: 6) {
@@ -282,7 +287,8 @@ private struct WeeklyLine: View {
 
 /// The pace reading — how the current burn compares to an even spend of the window.
 /// Silent when there's nothing meaningful to say.
-private struct PaceCaption: View {
+/// Shared with the app window, so it can't be file-private.
+struct PaceCaption: View {
     var account: AccountUsage
     var now: Date
 
