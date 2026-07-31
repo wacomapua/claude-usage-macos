@@ -31,9 +31,11 @@ private struct AccountCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
-            // Everything that qualifies the dial's number sits directly beneath it,
-            // where the eye already is.
-            VStack(spacing: 7) {
+            // The left column is the readout: the dial, then the figures at a size
+            // worth reading from across the desk. The short qualifiers that used to
+            // sit here move to one horizontal line on the right, where they cost a
+            // row instead of a whole column.
+            VStack(alignment: .leading, spacing: 12) {
                 DialGauge(
                     percent: account.session?.percent ?? 0,
                     resetsAt: account.session?.resetsAt,
@@ -42,12 +44,21 @@ private struct AccountCard: View {
                     size: 112,
                     caption: "5H"
                 )
-                PaceCaption(account: account, now: now)
-                ProjectionBadge(account: account, now: now)
-                DeltaChip(stats: account.stats)
+                .frame(maxWidth: .infinity)
+
+                if let stats = account.stats, !stats.isEmpty {
+                    StatReadout(label: "Tokens 5h",
+                                value: TokenFormat.compact(stats.sessionTokens), size: 22)
+                    StatReadout(label: "Value 5h",
+                                value: TokenFormat.money(stats.sessionCost),
+                                caption: "api", tint: .orange, size: 22)
+                    StatReadout(label: "Week",
+                                value: TokenFormat.money(stats.weekCost),
+                                caption: TokenFormat.compact(stats.weekTokens), size: 22)
+                }
                 Spacer(minLength: 0)
             }
-            .frame(width: 124)
+            .frame(width: 138)
 
             VStack(alignment: .leading, spacing: 10) {
                 AccountHeader(account: account, size: 14)
@@ -56,6 +67,8 @@ private struct AccountCard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+
+                QualifierRow(account: account, now: now)
 
                 if let weekly = account.weekly {
                     MiniMeter(title: "Weekly", percent: weekly.percent,
@@ -72,17 +85,6 @@ private struct AccountCard: View {
                 }
 
                 if let stats = account.stats, !stats.isEmpty {
-                    HStack(alignment: .top, spacing: 18) {
-                        StatReadout(label: "Tokens 5h",
-                                    value: TokenFormat.compact(stats.sessionTokens), size: 17)
-                        StatReadout(label: "Value 5h",
-                                    value: TokenFormat.money(stats.sessionCost),
-                                    caption: "api", tint: .orange, size: 17)
-                        StatReadout(label: "Week",
-                                    value: TokenFormat.money(stats.weekCost),
-                                    caption: TokenFormat.compact(stats.weekTokens), size: 17)
-                        Spacer(minLength: 0)
-                    }
                     BurnSparkline(buckets: stats.buckets, height: 26)
                     ModelMixBar(models: stats.models)
                     TopProjects(projects: stats.projects)

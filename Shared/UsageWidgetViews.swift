@@ -149,22 +149,34 @@ struct UsageLargeView: View {
                 if index > 0 { Hairline() }
 
                 HStack(alignment: .top, spacing: 14) {
-                    // The space under the dial is the best real estate in the layout:
-                    // directly beside the number it qualifies.
-                    VStack(spacing: 5) {
+                    // The left column is the readout — dial then figures, kept large.
+                    // The qualifiers ride one horizontal line on the right.
+                    VStack(alignment: .leading, spacing: 7) {
                         DialGauge(
                             percent: account.session?.percent ?? 0,
                             resetsAt: account.session?.resetsAt,
                             window: LimitWindow.session,
                             now: now,
-                            size: 104,
+                            size: 86,
                             caption: "5H"
                         )
-                        PaceCaption(account: account, now: now)
-                        ProjectionBadge(account: account, now: now)
-                        DeltaChip(stats: account.stats)
+                        .frame(maxWidth: .infinity)
+
+                        StatReadout(
+                            label: "Tokens 5h",
+                            value: TokenFormat.compact(account.stats?.sessionTokens ?? 0),
+                            size: 16
+                        )
+                        StatReadout(
+                            label: "Value 5h",
+                            value: TokenFormat.money(account.stats?.sessionCost ?? 0),
+                            caption: "api",
+                            tint: Dial.color(at: 0.5, scheme),
+                            size: 16
+                        )
+                        Spacer(minLength: 0)
                     }
-                    .frame(width: 116)
+                    .frame(width: 112)
 
                     VStack(alignment: .leading, spacing: 9) {
                         HStack(spacing: 6) {
@@ -172,25 +184,11 @@ struct UsageLargeView: View {
                             StalenessLabel(account: account, now: now)
                         }
 
+                        QualifierRow(account: account, now: now, showsPace: false)
+
                         if let weekly = account.weekly {
                             MiniMeter(title: "Weekly", percent: weekly.percent,
                                       resetsAt: weekly.resetsAt, now: now)
-                        }
-
-                        HStack(alignment: .top, spacing: 14) {
-                            StatReadout(
-                                label: "Tokens 5h",
-                                value: TokenFormat.compact(account.stats?.sessionTokens ?? 0),
-                                size: 16
-                            )
-                            StatReadout(
-                                label: "Value 5h",
-                                value: TokenFormat.money(account.stats?.sessionCost ?? 0),
-                                caption: "api",
-                                tint: Dial.color(at: 0.5, scheme),
-                                size: 16
-                            )
-                            Spacer(minLength: 0)
                         }
 
                         if let stats = account.stats, !stats.isEmpty {
@@ -287,6 +285,26 @@ private struct WeeklyLine: View {
 
 /// The pace reading — how the current burn compares to an even spend of the window.
 /// Silent when there's nothing meaningful to say.
+/// The three qualifiers on one line — they're all short, and stacking them wastes a
+/// column that the big figures use better.
+struct QualifierRow: View {
+    var account: AccountUsage
+    var now: Date
+    /// The widget has ~230pt for this row, which all three chips overflow. The
+    /// dial's own reference arc already shows pace, so that's the one to drop.
+    var showsPace: Bool = true
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if showsPace { PaceCaption(account: account, now: now) }
+            ProjectionBadge(account: account, now: now)
+            DeltaChip(stats: account.stats)
+            Spacer(minLength: 0)
+        }
+        .lineLimit(1)
+    }
+}
+
 /// Shared with the app window, so it can't be file-private.
 struct PaceCaption: View {
     var account: AccountUsage
