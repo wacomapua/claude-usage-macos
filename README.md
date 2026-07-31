@@ -6,7 +6,46 @@ and weekly limits, per-model weekly limits, and extra-usage spend.
 Built for a two-account setup (`~/.claude-personal` and `~/.claude-work`), but it
 discovers every account automatically, so any number works.
 
-## Where the numbers come from
+## Two data sources
+
+| Source | Gives | Freshness |
+| --- | --- | --- |
+| `<configDir>/.claude.json` → `cachedUsageUtilization` | Limit percentages, reset times, plan, extra-usage spend | Only while Claude Code runs |
+| `<configDir>/projects/**/*.jsonl` (transcripts) | Token counts, API-equivalent value, hourly burn history, model mix, turn count, top project | Every assistant turn |
+
+The second source is the interesting one. The usage cache is a single instantaneous
+reading; the transcripts record **every** assistant turn with its timestamp, model,
+and full `usage` block — so the shape of a working day is recoverable, and so is
+what that day would have cost.
+
+### Value is API-equivalent, not a bill
+
+Token value is computed from Claude API list rates and is **not** charged on a Max
+or Team subscription. It answers "what would this have cost on the API", which is
+the only honest way to put a number on subscription usage.
+
+Rates per million tokens, applied per model family from the transcript's `model` field:
+
+| | Input | Output |
+| --- | ---: | ---: |
+| Fable / Mythos | $10 | $50 |
+| Opus | $5 | $25 |
+| Sonnet | $3 ($2 intro through 2026-08-31) | $15 ($10 intro) |
+| Haiku | $1 | $5 |
+
+Cache traffic is priced off the input rate: reads ×0.1, 5-minute writes ×1.25,
+1-hour writes ×2. The transcript records the 5-minute and 1-hour cache splits
+separately, so those two write rates are applied correctly rather than averaged.
+
+### Scanning cost
+
+A cold scan of ~260 recent transcript files (~200MB) takes well under a second.
+Files are append-only, so each is read once in full and thereafter only from the
+byte offset where the last read stopped — warm rescans touch almost nothing. The
+scan runs off the main thread on a 60-second cadence, separate from the 15-second
+config-file poll.
+
+## Where the limit percentages come from
 
 Claude Code caches the figures `/usage` shows in `<configDir>/.claude.json`, under
 `cachedUsageUtilization`:
@@ -91,12 +130,21 @@ widget reads stays current.
 
 ## Design
 
-One reading per account, large, on an open face. The dial is a 270° sweep with the gap at
-the bottom; the arc is thick enough to carry a gradient, and everything else — labels,
-countdowns, separators — is deliberately quiet so the number is the only thing competing
-for attention. No cards inside the widgets: a card drawn on a widget is a box inside a
-box, and its border ends up fighting the dial. Accounts are separated by space and a
-hairline instead.
+A tachometer shows its **whole range**, not just the needle. The unfilled arc carries
+the full cool-to-hot ramp at low opacity, with a redline band over the last 15% — so
+the face reads as an instrument even at 6%, instead of being a mostly-empty grey ring
+with a small coloured stub.
+
+Everything else — labels, countdowns, separators — is deliberately quiet so the
+reading is the only thing competing for attention. No cards inside the widgets: a card
+drawn on a widget is a box inside a box, and its border ends up fighting the dial.
+Accounts are separated by space and a hairline instead.
+
+Three palettes, kept deliberately separate so two different readings can't be confused:
+
+- **Severity** — the cool-to-hot ramp on the dial, meters, and burn bars
+- **Model families** — violet Opus, magenta Fable, blue Sonnet, teal Haiku
+- **Structure** — explicit greys for labels and metadata
 
 The arc is a real `Shape` rather than a rotated, trimmed `Circle`, so its angular gradient
 lines up with actual screen angles instead of drifting with the rotation.
@@ -143,9 +191,9 @@ data already on disk (`Pace` in `Shared/UsageDesign.swift`).
 
 | Family | Shows |
 | --- | --- |
-| Small | A dial per account with the weekly figure beneath |
-| Medium | Two large dials side by side, split by a hairline |
-| Large | Everything, including per-model weekly limits and extra-usage spend |
+| Small | A dial per account over its session token count and value |
+| Medium | Dial, session tokens + value, burn sparkline, weekly line — per account |
+| Large | Adds the weekly meter, model mix with legend, turn count, weekly value, top project |
 
 ## Previewing without installing
 

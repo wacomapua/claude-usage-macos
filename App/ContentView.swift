@@ -62,12 +62,38 @@ private struct AccountCard: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                if let stats = account.stats, !stats.isEmpty {
+                    HStack(alignment: .top, spacing: 18) {
+                        StatReadout(label: "Tokens 5h",
+                                    value: TokenFormat.compact(stats.sessionTokens), size: 17)
+                        StatReadout(label: "Value 5h",
+                                    value: TokenFormat.money(stats.sessionCost),
+                                    caption: "api", tint: .orange, size: 17)
+                        StatReadout(label: "Week",
+                                    value: TokenFormat.money(stats.weekCost),
+                                    caption: TokenFormat.compact(stats.weekTokens), size: 17)
+                        Spacer(minLength: 0)
+                    }
+                    BurnSparkline(buckets: stats.buckets, height: 26)
+                    ModelMixBar(models: stats.models)
+                }
+
                 HStack(spacing: 5) {
+                    if let stats = account.stats, let project = stats.topProject {
+                        Text("\(stats.messageCount) turns")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Text("· \(project)")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                     if let spend = account.spend {
                         Text(spend.usedText)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
-                        Text("extra usage" + (spend.limitText.map { " of \($0)" } ?? ""))
+                        Text("extra usage")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
@@ -129,8 +155,9 @@ private struct FooterView: View {
 
             // The widget only sees what this app last wrote, so it stops updating if
             // the app isn't running. Worth saying plainly rather than hiding.
-            Text("Keep this app running (or launching at login) so the widget stays current. Numbers come from Claude Code's local cache and refresh whenever you use Claude Code.")
+            Text("Keep this app running (or launching at login) so the widget stays current. Limit percentages come from Claude Code's local cache and refresh whenever you use Claude Code. Token counts, value and burn history are read from your transcripts — the value shown is what that usage would have cost at Claude API list rates, not a charge on your plan.")
                 .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack {
                 Button("Refresh now") { monitor.refresh(force: true) }

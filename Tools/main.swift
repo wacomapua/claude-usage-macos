@@ -70,8 +70,33 @@ func main() {
         return
     }
 
-    // Prefer the user's real snapshot; fall back to sample data.
-    renderAll(SnapshotStore.read() ?? .placeholder, now: now, prefix: nil, into: outputDir)
+    // Build straight from the config files and scan the transcripts, so previews
+    // always show live data rather than whatever the app last published.
+    var snapshot = ClaudeConfigReader.buildSnapshot()
+    if snapshot.accounts.isEmpty { snapshot = .placeholder }
+
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    for index in snapshot.accounts.indices {
+        let account = snapshot.accounts[index]
+        let dir = home.appendingPathComponent(account.id, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: dir.path) else { continue }
+        let started = Date()
+        snapshot.accounts[index].stats = TranscriptScanner().scan(
+            configDir: dir,
+            sessionWindowStart: account.sessionWindowStart(now: now),
+            now: now
+        )
+        let stats = snapshot.accounts[index].stats
+        print(String(
+            format: "scanned %@ in %.2fs — %@ tokens, %@ this week, %d turns",
+            account.label, Date().timeIntervalSince(started),
+            TokenFormat.compact(stats?.sessionTokens ?? 0),
+            TokenFormat.money(stats?.weekCost ?? 0),
+            stats?.messageCount ?? 0
+        ))
+    }
+
+    renderAll(snapshot, now: now, prefix: nil, into: outputDir)
 }
 
 @MainActor

@@ -83,6 +83,44 @@ enum Dial {
     static let sweepDegrees: Double = 270
     static var sweepFraction: Double { sweepDegrees / 360 }
 
+    /// Where the redline band begins, as a fraction of the scale.
+    static let redlineStart: Double = 0.85
+
+    /// The whole scale, cool through hot, for painting the unfilled arc. Drawn
+    /// dim beneath the reading so the dial shows its full range at a glance.
+    static func scaleGradient(_ scheme: ColorScheme) -> AngularGradient {
+        let stops = scale(scheme)
+        var gradientStops = stops.map {
+            Gradient.Stop(color: swatch($0.color), location: $0.at * sweepFraction)
+        }
+        gradientStops.append(.init(color: swatch(stops[0].color), location: 1))
+        return AngularGradient(
+            gradient: Gradient(stops: gradientStops),
+            center: .center,
+            startAngle: .degrees(startDegrees),
+            endAngle: .degrees(startDegrees + 360)
+        )
+    }
+
+    /// Distinct hues per model family. Severity uses the cool-to-hot ramp, so the
+    /// model mix needs its own palette or the two readings would be confused.
+    static func modelColor(_ family: String, _ scheme: ColorScheme) -> Color {
+        let dark: [String: RGB] = [
+            "Opus":   (0.545, 0.475, 1.000),  // #8B79FF violet
+            "Fable":  (1.000, 0.451, 0.784),  // #FF73C8 magenta
+            "Sonnet": (0.322, 0.686, 1.000),  // #52AFFF blue
+            "Haiku":  (0.239, 0.855, 0.784),  // #3DDAC8 teal
+        ]
+        let light: [String: RGB] = [
+            "Opus":   (0.361, 0.259, 0.859),
+            "Fable":  (0.780, 0.161, 0.549),
+            "Sonnet": (0.078, 0.451, 0.792),
+            "Haiku":  (0.020, 0.545, 0.494),
+        ]
+        let table = scheme == .dark ? dark : light
+        return swatch(table[family] ?? (scheme == .dark ? (0.6, 0.6, 0.65) : (0.45, 0.45, 0.5)))
+    }
+
     // Explicit greys rather than the system hierarchy: `.tertiary` on a light background
     // is far too faint for 8pt type, which is most of what this widget is made of.
     static func track(_ scheme: ColorScheme) -> Color {
@@ -220,8 +258,19 @@ struct DialGauge: View {
 
     var body: some View {
         ZStack {
+            // The scale. A tachometer shows its whole range, not just the needle —
+            // the unfilled arc carries the full cool-to-hot ramp at low opacity so
+            // the face reads as an instrument even at 6%.
             ArcShape(fraction: 1)
-                .stroke(Dial.track(scheme), style: .init(lineWidth: lineWidth, lineCap: .round))
+                .stroke(Dial.scaleGradient(scheme), style: .init(lineWidth: lineWidth, lineCap: .round))
+                .opacity(scheme == .dark ? 0.20 : 0.16)
+
+            // The redline. Where the scale stops being advisory.
+            ArcShape(fraction: 1)
+                .trim(from: Dial.redlineStart, to: 1)
+                .stroke(Dial.color(at: 1, scheme),
+                        style: .init(lineWidth: lineWidth, lineCap: .butt))
+                .opacity(fraction >= Dial.redlineStart ? 0 : (scheme == .dark ? 0.42 : 0.30))
 
             // The pace reference, as a thin arc inset inside the main band. Drawn at
             // full width it competes with the reading — the eye takes the longest arc
@@ -340,6 +389,120 @@ struct MiniMeter: View {
                 }
             }
             .frame(height: 5)
+        }
+    }
+}
+
+/// Hourly token burn over the recent past. The one view here with real history —
+/// the usage cache is a single instantaneous reading, but the transcripts record
+/// every turn, so the shape of a working day is recoverable.
+struct BurnSparkline: View {
+    var buckets: [HourBucket]
+    var height: CGFloat = 22
+
+    @Environment(\.colorScheme) private var scheme
+
+    private var peak: Int { max(1, buckets.map(\.tokens).max() ?? 1) }
+
+    var body: some View {
+        GeometryReader { geo in
+            let count = max(buckets.count, 1)
+            let gap: CGFloat = 1.5
+            let barWidth = max(2, (geo.size.width - gap * CGFloat(count - 1)) / CGFloat(count))
+
+            HStack(alignment: .bottom, spacing: gap) {
+                ForEach(Array(buckets.enumerated()), id: \.offset) { _, bucket in
+                    let share = Double(bucket.tokens) / Double(peak)
+                    // Idle hours still get a visible stub so the time axis reads
+                    // as continuous rather than as missing data.
+                    let barHeight = bucket.tokens == 0 ? 1.5 : max(2.5, geo.size.height * share)
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(bucket.tokens == 0
+                              ? AnyShapeStyle(Dial.track(scheme))
+                              : AnyShapeStyle(Dial.color(at: 0.15 + share * 0.7, scheme)))
+                        .frame(width: barWidth, height: barHeight)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
+        }
+        .frame(height: height)
+    }
+}
+
+/// Output-token share per model family, as one stacked bar.
+struct ModelMixBar: View {
+    var models: [ModelSlice]
+    var height: CGFloat = 4
+    var showsLegend: Bool = true
+
+    @Environment(\.colorScheme) private var scheme
+
+    private var total: Int { max(1, models.reduce(0) { $0 + $1.tokens }) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            GeometryReader { geo in
+                HStack(spacing: 1) {
+                    ForEach(models) { model in
+                        Rectangle()
+                            .fill(Dial.modelColor(model.family, scheme))
+                            .frame(width: max(2, geo.size.width * Double(model.tokens) / Double(total)))
+                    }
+                }
+                .clipShape(.capsule)
+            }
+            .frame(height: height)
+
+            if showsLegend {
+                HStack(spacing: 8) {
+                    ForEach(models.prefix(3)) { model in
+                        HStack(spacing: 3) {
+                            Circle()
+                                .fill(Dial.modelColor(model.family, scheme))
+                                .frame(width: 5, height: 5)
+                            Text(model.family)
+                                .font(.system(size: 8.5, weight: .semibold))
+                                .foregroundStyle(Dial.label(scheme))
+                            Text("\(Int((Double(model.tokens) / Double(total) * 100).rounded()))%")
+                                .font(.system(size: 8.5).monospacedDigit())
+                                .foregroundStyle(Dial.meta(scheme))
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+}
+
+/// A labelled figure — the building block for the token and cost readouts.
+struct StatReadout: View {
+    var label: String
+    var value: String
+    var caption: String?
+    var tint: Color?
+    var size: CGFloat = 15
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label.uppercased())
+                .font(.system(size: 8, weight: .bold))
+                .tracking(0.8)
+                .foregroundStyle(Dial.label(scheme))
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value)
+                    .font(.system(size: size, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(tint ?? Color.primary)
+                if let caption {
+                    Text(caption)
+                        .font(.system(size: 8.5))
+                        .foregroundStyle(Dial.meta(scheme))
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
         }
     }
 }

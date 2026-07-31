@@ -59,6 +59,18 @@ struct AccountUsage: Codable, Hashable, Identifiable {
     var weekly: Gauge?
     var scoped: [ScopedGauge]
     var spend: Spend?
+    /// Derived from the transcripts rather than the usage cache — see TokenStats.
+    /// Defaulted so adding it didn't break every existing construction site.
+    var stats: TokenStats? = nil
+
+    /// When the current 5-hour window opened, worked back from its reset time.
+    /// Used to scope token totals to the same window the dial is showing.
+    func sessionWindowStart(now: Date) -> Date {
+        guard let resetsAt = session?.resetsAt, resetsAt > now else {
+            return now.addingTimeInterval(-LimitWindow.session)
+        }
+        return resetsAt.addingTimeInterval(-LimitWindow.session)
+    }
 
     /// The worst percentage across the account's still-current bars — what we surface at
     /// a glance. A window that has already rolled over is skipped rather than counted,

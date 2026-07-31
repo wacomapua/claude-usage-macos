@@ -7,31 +7,44 @@ import SwiftUI
 /// Every view takes its "now" explicitly: WidgetKit renders timeline entries ahead of
 /// time, so reading the clock at draw time would freeze every countdown.
 
-/// Small: a dial per account, with the weekly window as a line beneath.
+/// Small: a dial per account over its token and cost figures.
 struct UsageSmallView: View {
     var snapshot: UsageSnapshot
     var now: Date
+
+    @Environment(\.colorScheme) private var scheme
 
     private var accounts: [AccountUsage] { Array(snapshot.accounts.prefix(2)) }
 
     var body: some View {
         HStack(spacing: 10) {
             ForEach(accounts) { account in
-                VStack(spacing: 6) {
+                VStack(spacing: 5) {
                     DialGauge(
                         percent: account.session?.percent ?? 0,
                         resetsAt: account.session?.resetsAt,
                         window: LimitWindow.session,
                         now: now,
-                        size: accounts.count > 1 ? 64 : 116,
+                        size: accounts.count > 1 ? 62 : 116,
                         caption: "5H"
                     )
                     Text(account.label)
-                        .font(.system(size: 10.5, weight: .bold))
-                        .tracking(-0.1)
+                        .font(.system(size: 10, weight: .bold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                    WeeklyLine(account: account, now: now, showsCountdown: false)
+
+                    if let stats = account.stats, !stats.isEmpty {
+                        VStack(spacing: 0) {
+                            Text(TokenFormat.compact(stats.sessionTokens))
+                                .font(.system(size: 12, weight: .bold, design: .rounded)
+                                    .monospacedDigit())
+                            Text(TokenFormat.money(stats.sessionCost))
+                                .font(.system(size: 9).monospacedDigit())
+                                .foregroundStyle(Dial.meta(scheme))
+                        }
+                    } else {
+                        WeeklyLine(account: account, now: now, showsCountdown: false)
+                    }
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -39,81 +52,123 @@ struct UsageSmallView: View {
     }
 }
 
-/// Medium: two large dials, one per account.
-///
-/// Side-by-side columns give each dial enough room for the graduated rim, which the
-/// stacked-row alternative could not — and the rim is what makes the pace mark legible.
+/// Medium: two dials with the session's token spend and burn history.
 struct UsageMediumView: View {
     var snapshot: UsageSnapshot
     var now: Date
+
+    @Environment(\.colorScheme) private var scheme
 
     private var accounts: [AccountUsage] { Array(snapshot.accounts.prefix(2)) }
 
     var body: some View {
         HStack(spacing: 0) {
             ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
-                if index > 0 { Hairline(axis: .vertical).padding(.vertical, 6) }
+                if index > 0 { Hairline(axis: .vertical).padding(.vertical, 4) }
 
-                VStack(spacing: 6) {
-                    Text(account.label)
-                        .font(.system(size: 12, weight: .bold))
-                        .tracking(-0.2)
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: 6) {
+                    AccountHeader(account: account, size: 11.5)
 
-                    DialGauge(
-                        percent: account.session?.percent ?? 0,
-                        resetsAt: account.session?.resetsAt,
-                        window: LimitWindow.session,
-                        now: now,
-                        size: 88,
-                        caption: "5H"
-                    )
-
-                    WeeklyLine(account: account, now: now, showsCountdown: true)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-    }
-}
-
-/// Large: everything — per-model weekly limits and extra-usage spend included.
-struct UsageLargeView: View {
-    var snapshot: UsageSnapshot
-    var now: Date
-
-    private var accounts: [AccountUsage] { Array(snapshot.accounts.prefix(3)) }
-
-    var body: some View {
-        VStack(spacing: 14) {
-            ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
-                if index > 0 { Hairline() }
-
-                HStack(spacing: 16) {
-                    VStack(spacing: 6) {
+                    HStack(spacing: 10) {
                         DialGauge(
                             percent: account.session?.percent ?? 0,
                             resetsAt: account.session?.resetsAt,
                             window: LimitWindow.session,
                             now: now,
-                            size: 112,
+                            size: 68,
+                            caption: "5H"
+                        )
+                        VStack(alignment: .leading, spacing: 7) {
+                            StatReadout(
+                                label: "Tokens",
+                                value: TokenFormat.compact(account.stats?.sessionTokens ?? 0),
+                                caption: "5h",
+                                size: 14
+                            )
+                            StatReadout(
+                                label: "Value",
+                                value: TokenFormat.money(account.stats?.sessionCost ?? 0),
+                                caption: "api",
+                                tint: Dial.color(at: 0.5, scheme),
+                                size: 14
+                            )
+                        }
+                    }
+
+                    if let stats = account.stats, !stats.isEmpty {
+                        BurnSparkline(buckets: stats.buckets, height: 18)
+                    }
+
+                    WeeklyLine(account: account, now: now, showsCountdown: true)
+                }
+                .padding(.horizontal, 11)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+    }
+}
+
+/// Large: the full instrument panel — limits, spend, burn history and model mix.
+struct UsageLargeView: View {
+    var snapshot: UsageSnapshot
+    var now: Date
+
+    @Environment(\.colorScheme) private var scheme
+
+    private var accounts: [AccountUsage] { Array(snapshot.accounts.prefix(2)) }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
+                if index > 0 { Hairline() }
+
+                HStack(alignment: .top, spacing: 14) {
+                    VStack(spacing: 5) {
+                        DialGauge(
+                            percent: account.session?.percent ?? 0,
+                            resetsAt: account.session?.resetsAt,
+                            window: LimitWindow.session,
+                            now: now,
+                            size: 104,
                             caption: "5H"
                         )
                         PaceCaption(account: account, now: now)
                     }
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        AccountHeader(account: account, size: 14)
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack(spacing: 6) {
+                            AccountHeader(account: account, size: 13)
+                            StalenessLabel(account: account, now: now)
+                        }
+
                         if let weekly = account.weekly {
                             MiniMeter(title: "Weekly", percent: weekly.percent,
                                       resetsAt: weekly.resetsAt, now: now)
                         }
-                        ForEach(account.scoped.prefix(2)) { scoped in
-                            MiniMeter(title: scoped.name, percent: scoped.percent,
-                                      resetsAt: scoped.resetsAt, now: now)
+
+                        HStack(alignment: .top, spacing: 14) {
+                            StatReadout(
+                                label: "Tokens 5h",
+                                value: TokenFormat.compact(account.stats?.sessionTokens ?? 0),
+                                size: 16
+                            )
+                            StatReadout(
+                                label: "Value 5h",
+                                value: TokenFormat.money(account.stats?.sessionCost ?? 0),
+                                caption: "api",
+                                tint: Dial.color(at: 0.5, scheme),
+                                size: 16
+                            )
+                            Spacer(minLength: 0)
                         }
+
+                        if let stats = account.stats, !stats.isEmpty {
+                            BurnSparkline(buckets: stats.buckets, height: 20)
+                            ModelMixBar(models: stats.models)
+                        }
+
                         Spacer(minLength: 0)
-                        FooterLine(account: account, now: now)
+                        WeekFooter(account: account)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -123,6 +178,43 @@ struct UsageLargeView: View {
 }
 
 // MARK: - Shared pieces
+
+/// The week in one line: turns taken, what they'd have cost on the API, and the
+/// project that consumed the most. All three come from the transcripts.
+private struct WeekFooter: View {
+    var account: AccountUsage
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        if let stats = account.stats, !stats.isEmpty {
+            HStack(spacing: 5) {
+                Text("\(stats.messageCount)")
+                    .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(Dial.label(scheme))
+                Text("turns")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Dial.meta(scheme))
+
+                Text(TokenFormat.money(stats.weekCost))
+                    .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(Dial.label(scheme))
+                Text("wk")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Dial.meta(scheme))
+
+                if let project = stats.topProject {
+                    Text(project)
+                        .font(.system(size: 9))
+                        .foregroundStyle(Dial.meta(scheme))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+}
 
 /// The weekly window as a single line, for layouts with no room for a meter.
 private struct WeeklyLine: View {
@@ -182,28 +274,6 @@ private struct PaceCaption: View {
                     .lineLimit(1)
             }
             .foregroundStyle(pace.isAhead ? Dial.color(at: 0.85, scheme) : Dial.meta(scheme))
-        }
-    }
-}
-
-private struct FooterLine: View {
-    var account: AccountUsage
-    var now: Date
-
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        HStack(spacing: 5) {
-            if let spend = account.spend {
-                Text(spend.usedText)
-                    .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Dial.label(scheme))
-                Text("extra")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Dial.meta(scheme))
-            }
-            Spacer(minLength: 0)
-            StalenessLabel(account: account, now: now)
         }
     }
 }
