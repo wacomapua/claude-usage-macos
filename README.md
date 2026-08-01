@@ -286,3 +286,18 @@ App/        Non-sandboxed host app: file watching, snapshot publishing, settings
 Widget/     WidgetKit extension: timeline provider + family switch
 Tools/      PNG preview renderer
 ```
+
+## Known issues
+
+**The app stops updating the widget when its window is closed.** `UsageMonitor` is
+created by the window scene's `@StateObject`, which SwiftUI instantiates lazily when a
+window's body is first evaluated — so launching with no window (which macOS does when
+it restores that state) means nothing polls, scans, or publishes. Open the window and
+it resumes. The fix is to own the monitor at app level instead; a first attempt at that
+is on `feat/consent-gate` and is not yet working.
+
+**`feat/consent-gate` is unfinished.** It adds a first-run screen that states what gets
+read, lets you choose which accounts to include, and can redact email addresses from
+the app, the widget and the snapshot file. The gating logic verifies correct under
+instrumentation, but snapshot publishing regresses on that branch. Don't merge it until
+that's resolved.
