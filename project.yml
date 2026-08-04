@@ -8,11 +8,18 @@ options:
 
 settings:
   base:
-    # Ad-hoc signing: enough to run locally and to register the widget extension,
-    # and it needs no developer account or provisioning profile. Swap in a real
-    # identity + DEVELOPMENT_TEAM if you ever want to distribute this.
+    # Signed with a real identity rather than ad-hoc, so the designated requirement
+    # is `identifier + anchor apple generic + leaf certificate` instead of a bare
+    # cdhash. That matters for the Keychain: "Always Allow" stores an ACL against the
+    # designated requirement, and an ad-hoc cdhash changes on every single build — so
+    # the grant stops matching and macOS prompts again after each rebuild.
+    #
+    # Manual style: automatic signing insists on a "Mac Development" certificate,
+    # which needs Xcode signed in to the developer account. This works with the plain
+    # "Apple Development" certificate already in the login Keychain, and needs no
+    # provisioning profile now that the App Group entitlement is gone.
     CODE_SIGN_STYLE: Manual
-    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_IDENTITY: "Apple Development: wacomapua@gmail.com (39GRBR78MZ)"
     CODE_SIGNING_REQUIRED: YES
     CODE_SIGNING_ALLOWED: YES
     PROVISIONING_PROFILE_SPECIFIER: ""

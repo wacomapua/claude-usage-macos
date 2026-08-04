@@ -152,7 +152,28 @@ ClaudeUsageWidget.appex  sandboxed      reads the snapshot ─┘
    Application Support directory, and the non-sandboxed host app may write into it. No
    entitlements, no profile, no paid developer account. **This is what the build uses.**
 
-Because of transport 2, the project signs ad-hoc and builds with no developer account.
+## Code signing
+
+The project signs with the **"Apple Development" certificate already in your login
+Keychain** — not ad-hoc, and with no provisioning profile (nothing here requests a
+restricted entitlement since the App Group was dropped).
+
+That choice is about the Keychain, not distribution. "Always Allow" on a Keychain
+prompt stores an ACL against the app's *designated requirement*. Ad-hoc signing makes
+that requirement a bare `cdhash` — the hash of one exact binary — so every rebuild
+looks like a different app and macOS asks again. A real certificate gives:
+
+```
+identifier "com.wacomapua.claudeusage" and anchor apple generic
+  and certificate leaf[subject.CN] = "Apple Development: …"
+```
+
+which survives rebuilds, so the grant sticks.
+
+Set `CODE_SIGN_IDENTITY` in `project.yml` to your own certificate name
+(`security find-identity -v -p codesigning` lists them). Leave `DEVELOPMENT_TEAM`
+empty — setting it makes Xcode insist on a "Mac Development" certificate, which
+requires Xcode to be signed in to the developer account.
 
 > One wrinkle worth knowing: macOS recreates an extension's container the first time it
 > registers the widget, which wipes whatever is in it. `UsageMonitor` therefore rewrites
