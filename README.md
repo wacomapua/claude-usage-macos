@@ -50,7 +50,35 @@ an expired token. Refresh tokens rotate: spending one here could invalidate the 
 Claude Code holds and sign you out of the CLI. An expired token falls back to the
 cached numbers, and Claude Code refreshes it itself next time it runs.
 
-macOS prompts once for Keychain access, since the item belongs to another app.
+### The prompt that would not stay away
+
+Asking for the item through `SecItemCopyMatching` raises the "ClaudeUsage wants to
+access key ... in your keychain" dialog, and **"Always Allow" does not hold**. The
+grant is an entry in that item's access control list, and the item is not ours:
+
+```
+Claude Code  ->  security add-generic-password -U   (writes the item)
+                 security find-generic-password -w  (reads it back)
+```
+
+Everything Claude Code does to those credentials goes through `/usr/bin/security`,
+so the trusted application on the ACL is `security`, which is why the CLI never
+prompts itself. "Always Allow" adds this app alongside it, and that survives exactly
+until Claude Code next rewrites the item, at which point the ACL goes back to what
+its writer put there and the dialog returns. Granting it harder does not help; the
+prompt comes back on roughly the cadence of token refresh.
+
+So the app reads the item the same way Claude Code does, by running
+`security find-generic-password -w -s <service>` and parsing stdout. The requesting
+process is then `security`, which is already trusted, and nothing is asked. The
+framework call is kept as a fallback for a machine where the item was written by
+something else.
+
+`CredentialStore` also caches the parsed token in memory until it nears expiry, so a
+minute-by-minute live loop costs a handful of Keychain reads a day rather than 1,440
+per account, and it does the read on an actor rather than the main thread. A
+Keychain dialog owns the calling thread until it is answered, and on the main actor
+that freezes the whole app behind it.
 
 ## Two data sources
 
@@ -168,7 +196,9 @@ identifier "com.wacomapua.claudeusage" and anchor apple generic
   and certificate leaf[subject.CN] = "Apple Development: …"
 ```
 
-which survives rebuilds, so the grant sticks.
+which survives rebuilds, so the grant sticks. That fixed *a* recurring prompt, the
+one after every build, but not the one after every token refresh, which needed the
+change described under [Live usage](#live-usage-optional) instead.
 
 Set `CODE_SIGN_IDENTITY` in `project.yml` to your own certificate name
 (`security find-identity -v -p codesigning` lists them). Leave `DEVELOPMENT_TEAM`
