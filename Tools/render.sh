@@ -11,6 +11,8 @@ swiftc -O \
   -target arm64-apple-macosx14.0 \
   -o "$out/render-previews" \
   "$root"/Shared/*.swift \
+  "$root"/App/CodexAppServer.swift \
+  "$root"/App/CodexReader.swift \
   "$root"/Tools/main.swift
 
 "$out/render-previews" "$out"

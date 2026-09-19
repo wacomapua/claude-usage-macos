@@ -1,10 +1,11 @@
 # Claude Usage
 
-A macOS widget that tracks Claude Code usage across multiple accounts — session (5-hour)
-and weekly limits, per-model weekly limits, and extra-usage spend.
+A macOS widget that tracks coding-agent usage across multiple accounts: session
+(5-hour) and weekly limits, per-model weekly limits, and extra-usage spend.
 
-Built for a two-account setup (`~/.claude-personal` and `~/.claude-work`), but it
-discovers every account automatically, so any number works.
+Built for a two-account Claude Code setup (`~/.claude-personal` and `~/.claude-work`),
+but it discovers every account automatically, so any number works. **Codex is tracked
+too**, on the same dials, when the CLI is installed. See [Codex](#codex).
 
 ## Account discovery
 
@@ -80,12 +81,107 @@ per account, and it does the read on an actor rather than the main thread. A
 Keychain dialog owns the calling thread until it is answered, and on the main actor
 that freezes the whole app behind it.
 
-## Two data sources
+## Codex
+
+Codex is on the same dials, read a completely different way.
+
+Claude Code caches the figures its `/usage` view shows into `.claude.json`, so this app
+can read them off the disk and only needs the network to be *fresher*. **Codex caches
+nothing.** The rate limits it draws in its own status line arrive on the wire and are
+never persisted: grepping all of `~/.codex` finds `usedPercent` only inside
+`sessions/*.jsonl` rollout files that the current version has stopped writing, and in
+none of its SQLite stores. There is nothing on disk to read.
+
+So every Codex figure here is a live read, and this app's own snapshot file is the only
+thing that carries them across a relaunch. That is why `UsageMonitor` now seeds itself
+from that snapshot at startup instead of rebuilding from the config files alone.
+
+### The route
+
+Codex ships a JSON-RPC server. Three read-only methods cover everything:
+
+```
+codex app-server                     # JSON-RPC over stdio
+  initialize                         # + the `initialized` notification
+  account/rateLimits/read            # windows, plan, credits, spend control
+  account/usage/read                 # lifetime and daily token totals, streaks
+  account/read                       # email, plan
+```
+
+Going through the CLI rather than calling the backend directly is the point:
+
+- **No token handling.** Codex owns its OAuth tokens in `~/.codex/auth.json` and
+  refreshes them itself. Reading that file and spending a refresh token here could
+  invalidate the CLI's own copy. That is the exact trap the Claude live path documents
+  above, avoided entirely by never touching the credentials. No Keychain prompt either.
+- **A stated contract.** `codex app-server generate-json-schema --out <dir>` emits the
+  whole protocol, so the response shape is checkable rather than reverse-engineered.
+
+Nothing here starts a thread, a turn, or anything else that spends quota.
+
+It runs every 5 minutes, not every 60 seconds like the Claude live fetch: it costs a
+whole subprocess plus a backend round trip, and windows measured in hours or days don't
+move faster than that. A failure doubles the interval to a 30-minute ceiling; a missing
+CLI goes straight to the ceiling, because retrying a permanent condition is just noise.
+
+### Finding the binary
+
+An app launched by the Finder or by launchd inherits a bare
+`/usr/bin:/bin:/usr/sbin:/sbin`, so `codex` is never simply on the `PATH` the way it is
+in a terminal. `CodexAppServer.locate()` checks the usual Homebrew, npm, pnpm, bun and
+volta locations first, then falls back to asking a login shell (`zsh -lc 'command -v
+codex'`), which catches asdf, mise and hand-rolled prefixes. Resolved once per run, so
+installing Codex while the app is running needs a restart.
+
+### Windows are data, not constants
+
+Claude's payload never states its window lengths; they're implied by the field names
+`five_hour` and `seven_day`. Codex **does** state its own, and they vary by plan: a free
+account is metered over 30 days where a paid one is metered over 5 hours. So
+`windowDurationMins` travels on the `Gauge`, and the dial caption, the pace marker and
+the projection all key off it. A free plan's 30-day bucket drawn as a five-hour session
+would read wildly hot.
+
+### What Codex does not report
+
+`CodexStats` is deliberately a separate type from `TokenStats` rather than a half-filled
+one. `TokenStats` comes from Claude Code's transcripts, which record every turn: that's
+what makes a five-hour token figure, a model mix, a top project and an API-equivalent
+value possible. Codex publishes none of it.
+
+| Claude | Codex |
+| --- | --- |
+| Tokens in the current 5-hour window | Tokens per **whole day**, summed over the window |
+| API-equivalent value | Not reported (no model attribution, so no rate to apply) |
+| Hourly burn sparkline | Daily burn over 30 days, labelled as such |
+| Model mix | Not reported |
+| Top project | Not reported |
+| Turn count | Day streak, peak day, lifetime tokens |
+| Day-over-day delta | Not reported (whole days only, so "vs the same time yesterday" isn't like for like) |
+
+`thread_history_*.sqlite` records the items in a turn but not what they cost, so there is
+no finer source to fall back on. Zeroes in those columns would have looked like readings,
+which is why they're absent instead.
+
+Two things are passed through verbatim: the credit balance and the spend-control
+figures. Codex sends them as pre-formatted strings with no currency or exponent beside
+them, so reformatting would mean guessing both.
+
+### Blocked is read, never inferred
+
+`ordinaryUsageAllowed` and `rateLimitReachedType` say whether usage is actually refused.
+The schema is explicit that a client must not take a percentage or a reset time as
+evidence of recovery, and this machine's own reading of 99% used with
+`ordinaryUsageAllowed: true` is exactly the case where guessing from the dial would
+have been wrong.
+
+## Three data sources
 
 | Source | Gives | Freshness |
 | --- | --- | --- |
 | `<configDir>/.claude.json` → `cachedUsageUtilization` | Limit percentages, reset times, plan, extra-usage spend | Only while Claude Code runs |
 | `<configDir>/projects/**/*.jsonl` (transcripts) | Token counts, API-equivalent value, hourly burn history, model mix, turn count, top project | Every assistant turn |
+| `codex app-server` (JSON-RPC over stdio) | Codex limit percentages, window lengths, plan, daily token totals, streaks, credits | Every read; nothing is cached |
 
 The second source is the interesting one. The usage cache is a single instantaneous
 reading; the transcripts record **every** assistant turn with its timestamp, model,
@@ -305,11 +401,20 @@ data already on disk (`Pace` in `Shared/UsageDesign.swift`).
 
 ## Layouts
 
-| Family | Shows |
-| --- | --- |
-| Small | A dial per account over its session token count and value |
-| Medium | Dial, session tokens + value, burn sparkline, weekly line — per account |
-| Large | Adds the weekly meter, model mix with legend, turn count, weekly value, top project |
+| Family | Accounts | Shows |
+| --- | --- | --- |
+| Small | 2 | A dial per account over its session token count and value |
+| Medium | 2 | Dial, session tokens + value, burn sparkline, weekly line — per account |
+| Large | 3 | Adds the weekly meter, model mix with legend, turn count, weekly value, top project |
+
+Adding Codex means there can be more accounts than any size has room for, so each size
+takes the **busiest** few rather than the first few (`UsageSnapshot.busiest`), ranked by
+the worst still-current window. A fixed order would have pinned Codex behind two Claude
+accounts permanently. Ties break on discovery order, so a quiet day doesn't reshuffle the
+widget every refresh.
+
+The large family buys its third row by shrinking the dial and dropping the model-mix
+strip; a two-account machine sees exactly what it saw before.
 
 ## Previewing without installing
 
@@ -337,6 +442,12 @@ App/        Non-sandboxed host app: file watching, snapshot publishing, settings
 Widget/     WidgetKit extension: timeline provider + family switch
 Tools/      PNG preview renderer
 ```
+
+The Codex process driver (`App/CodexAppServer.swift`) lives in `App/` rather than
+`Shared/` on purpose: the widget extension is sandboxed and must never spawn a
+subprocess, and keeping the file out of its target makes that structural rather than a
+comment. Only the model (`Shared/CodexStats.swift`) is shared, because the widget has to
+decode it out of the snapshot.
 
 ## Known issues
 

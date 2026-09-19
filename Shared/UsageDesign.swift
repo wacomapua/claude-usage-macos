@@ -255,9 +255,11 @@ struct ProjectionBadge: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        // The account's own window, not a fixed five hours: a Codex free plan is
+        // metered over 30 days, and projecting that as a session would read wildly hot.
         if let projection = LimitProjection(percent: account.session?.percent ?? 0,
                                             resetsAt: account.session?.resetsAt,
-                                            window: LimitWindow.session,
+                                            window: account.primaryWindow,
                                             now: now) {
             let tint = projection.willHit ? Dial.color(at: 0.95, scheme) : Dial.meta(scheme)
             HStack(spacing: 3) {
@@ -775,7 +777,11 @@ struct StalenessLabel: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            if account.isLive {
+            // "Live" has to mean *currently* live. A reading fetched from the API but
+            // 40 minutes old is stale however it arrived, and Codex makes that likely:
+            // it polls every 5 minutes and backs off to 30 on repeated failure, so a
+            // card could otherwise sit there claiming to be current for half an hour.
+            if account.isLive && !isStale {
                 // Live figures need no staleness caveat — say so, and say it in the
                 // calm end of the palette so it reads as reassurance, not alarm.
                 Circle()
