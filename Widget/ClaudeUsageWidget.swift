@@ -39,7 +39,7 @@ struct ClaudeUsageWidget: Widget {
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Claude Usage")
-        .description("Session and weekly limits for each of your Claude accounts.")
+        .description("Session and weekly limits for each of your Claude and Codex accounts.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

@@ -18,13 +18,14 @@ private final class ScannerBox: @unchecked Sendable {
 
 /// Watches the Claude Code config files and republishes a snapshot for the widget.
 ///
-/// Three loops, each on its own cadence because they cost wildly different amounts:
+/// Four loops, each on its own cadence because they cost wildly different amounts:
 ///
 /// | Loop | Every | Cost |
 /// | --- | --- | --- |
 /// | Config poll | 15s | two `stat` calls |
 /// | Transcript scan | 60s | incremental read, off the main thread |
-/// | Live usage fetch | 5min | one HTTPS request per account |
+/// | Live usage fetch | 60s | one HTTPS request per Claude account |
+/// | Codex read | 5min | a subprocess and a backend round trip |
 @MainActor
 final class UsageMonitor: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot = .empty
@@ -33,12 +34,32 @@ final class UsageMonitor: ObservableObject {
     @Published private(set) var snapshotPaths: [String] = []
     /// Per-account failure text from the last live fetch, if any.
     @Published private(set) var liveErrors: [String: String] = [:]
+    /// Failure text from the last Codex read, if any.
+    @Published private(set) var codexError: String?
+    /// Whether a Codex CLI was found on this machine. Resolved off the main thread on
+    /// the first read, because the fallback lookup spawns a login shell.
+    @Published private(set) var codexAvailable = false
+    @Published private(set) var codexPath: String?
 
     /// Live fetch needs Keychain access, which prompts the user, so it's opt-in.
     @Published var liveEnabled: Bool = UserDefaults.standard.bool(forKey: "liveEnabled") {
         didSet {
             UserDefaults.standard.set(liveEnabled, forKey: "liveEnabled")
             if liveEnabled { fetchLive(force: true) } else { liveErrors = [:] }
+        }
+    }
+
+    /// Codex, on the other hand, defaults on. It prompts for nothing: the CLI owns its
+    /// own tokens and this app never reads them, so there's no Keychain dialog and no
+    /// refresh-token hazard to warn anyone about.
+    @Published var codexEnabled: Bool = {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: "codexEnabled") != nil else { return true }
+        return defaults.bool(forKey: "codexEnabled")
+    }() {
+        didSet {
+            UserDefaults.standard.set(codexEnabled, forKey: "codexEnabled")
+            if codexEnabled { fetchCodex(force: true) } else { dropCodex() }
         }
     }
 
@@ -71,7 +92,24 @@ final class UsageMonitor: ObservableObject {
     private let liveBackoffCeiling: TimeInterval = 1800
     private var liveBackoff: TimeInterval = 0
 
+    /// Codex costs a whole subprocess plus a backend round trip, where the Claude live
+    /// path is one HTTPS request against a token already in memory. Five minutes keeps
+    /// it honest without spawning a process a thousand times a day. Rate-limit windows
+    /// measured in hours or days don't move faster than that.
+    private let codexQueue = DispatchQueue(label: "com.wacomapua.claudeusage.codex", qos: .utility)
+    private var lastCodexFetch: Date = .distantPast
+    private var codexInFlight = false
+    private let codexInterval: TimeInterval = 300
+    private let codexBackoffCeiling: TimeInterval = 1800
+    private var codexBackoff: TimeInterval = 0
+
     init() {
+        // Start from whatever was last published. Claude's numbers get rebuilt from disk
+        // a line later, but Codex has no on-disk cache anywhere. This file is the only
+        // copy of its figures between launches, and without this the Codex card would
+        // disappear for the first five minutes of every run.
+        if let saved = SnapshotStore.read() { snapshot = saved }
+
         refresh(force: true)
         timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -93,6 +131,7 @@ final class UsageMonitor: ObservableObject {
         guard force || snapshotMissing || current != fingerprint else {
             scanTranscripts(force: false)
             fetchLive(force: false)
+            fetchCodex(force: false)
             return
         }
         fingerprint = current
@@ -114,10 +153,18 @@ final class UsageMonitor: ObservableObject {
                 rebuilt.accounts[index].isLive = true
             }
         }
+
+        // `buildSnapshot` only ever returns Claude accounts, because it reads config
+        // files and Codex has none. Keep the last reading rather than dropping the card every
+        // time a Claude config file is touched.
+        if codexEnabled, let codex = snapshot.accounts.first(where: { $0.provider == .codex }) {
+            rebuilt.accounts.append(codex)
+        }
         publish(rebuilt)
 
         scanTranscripts(force: force)
         fetchLive(force: force)
+        fetchCodex(force: force)
     }
 
     private func publish(_ snapshot: UsageSnapshot) {
@@ -177,6 +224,67 @@ final class UsageMonitor: ObservableObject {
         }
     }
 
+    // MARK: - Codex read
+
+    private func fetchCodex(force: Bool) {
+        guard codexEnabled, !codexInFlight else { return }
+        let now = Date()
+        let wait = codexInterval + codexBackoff
+        guard force || now.timeIntervalSince(lastCodexFetch) >= wait else { return }
+        codexInFlight = true
+        lastCodexFetch = now
+
+        codexQueue.async { [weak self] in
+            // Resolving the binary can spawn a login shell on the first call, so even
+            // the availability check belongs off the main thread.
+            let available = CodexAppServer.isAvailable
+            let path = CodexAppServer.binaryPath
+            let result = Result { try CodexReader.read() }
+
+            Task { @MainActor in
+                guard let self else { return }
+                self.codexAvailable = available
+                self.codexPath = path
+
+                switch result {
+                case .success(let account):
+                    self.codexBackoff = 0
+                    self.codexError = nil
+                    var updated = self.snapshot
+                    if let index = updated.accounts.firstIndex(where: { $0.provider == .codex }) {
+                        updated.accounts[index] = account
+                    } else {
+                        updated.accounts.append(account)
+                    }
+                    self.publish(updated)
+
+                case .failure(let error):
+                    self.codexError = error.localizedDescription
+                    // A missing install is permanent, so back all the way off rather
+                    // than spawning a process into a wall every five minutes. Anything
+                    // else might be transient, so it doubles from the base interval.
+                    if case CodexAppServer.ReadError.notInstalled = error {
+                        self.codexBackoff = self.codexBackoffCeiling
+                    } else {
+                        self.codexBackoff = min(
+                            self.codexBackoffCeiling,
+                            self.codexBackoff == 0 ? self.codexInterval : self.codexBackoff * 2
+                        )
+                    }
+                }
+                self.codexInFlight = false
+            }
+        }
+    }
+
+    private func dropCodex() {
+        codexError = nil
+        codexBackoff = 0
+        var updated = snapshot
+        updated.accounts.removeAll { $0.provider == .codex }
+        publish(updated)
+    }
+
     // MARK: - Transcript scan
 
     /// Rescans the transcripts for token counts, cost, burn history and model mix.
@@ -187,6 +295,8 @@ final class UsageMonitor: ObservableObject {
         scanInFlight = true
         lastScan = now
 
+        // Codex accounts have no `dataDirPath` and are skipped here: Codex records no
+        // per-turn token counts anywhere on disk, so there are no transcripts to scan.
         let targets: [(id: String, directory: URL, windowStart: Date)] =
             snapshot.accounts.compactMap { account in
                 guard let path = account.dataDirPath else { return nil }

@@ -29,6 +29,8 @@ private struct AccountCard: View {
     var account: AccountUsage
     private let now = Date()
 
+    private var isCodex: Bool { account.provider == .codex }
+
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
             // The left column is the readout: the dial, then the figures at a size
@@ -39,13 +41,25 @@ private struct AccountCard: View {
                 DialGauge(
                     percent: account.session?.percent ?? 0,
                     resetsAt: account.session?.resetsAt,
-                    window: LimitWindow.session,
+                    window: account.primaryWindow,
                     now: now,
                     size: 112,
-                    caption: "5H"
+                    caption: account.primaryCaption
                 )
 
-                if let stats = account.stats, !stats.isEmpty {
+                if isCodex {
+                    if let codex = account.codex, !codex.isEmpty {
+                        StatReadout(label: "Tokens \(account.primaryCaption.lowercased())",
+                                    value: CodexFormat.tokens(codex.windowTokens),
+                                    size: 22, alignment: .center)
+                        StatReadout(label: "Lifetime",
+                                    value: CodexFormat.tokens(codex.lifetimeTokens),
+                                    size: 22, alignment: .center)
+                        StatReadout(label: "Peak day",
+                                    value: CodexFormat.tokens(codex.peakDailyTokens),
+                                    size: 22, alignment: .center)
+                    }
+                } else if let stats = account.stats, !stats.isEmpty {
                     StatReadout(label: "Tokens 5h",
                                 value: TokenFormat.compact(stats.sessionTokens),
                                 size: 22, alignment: .center)
@@ -73,7 +87,10 @@ private struct AccountCard: View {
                 QualifierRow(account: account, now: now)
 
                 if let weekly = account.weekly {
-                    MiniMeter(title: "Weekly", percent: weekly.percent,
+                    MiniMeter(title: isCodex
+                                ? UsageFormat.windowCaption(weekly.windowDuration ?? LimitWindow.weekly)
+                                : "Weekly",
+                              percent: weekly.percent,
                               resetsAt: weekly.resetsAt, now: now)
                 }
                 ForEach(account.scoped) { scoped in
@@ -82,18 +99,23 @@ private struct AccountCard: View {
                 }
 
                 if account.session == nil && account.weekly == nil {
-                    Text("No usage cached yet — run Claude Code under this account once.")
+                    Text(isCodex
+                         ? "Codex reported no metered windows for this account."
+                         : "No usage cached yet — run Claude Code under this account once.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
-                if let stats = account.stats, !stats.isEmpty {
-                    BurnSparkline(buckets: stats.buckets, height: 26)
+                BurnHistory(account: account, now: now, height: 26)
+
+                if !isCodex, let stats = account.stats, !stats.isEmpty {
                     ModelMixBar(models: stats.models)
                     TopProjects(projects: stats.projects)
                 }
 
+                if isCodex { CodexNotes(stats: account.codex) }
+
                 HStack(spacing: 5) {
-                    if let stats = account.stats, let project = stats.topProject {
+                    if let stats = account.stats, let project = stats.topProject, !isCodex {
                         Text("\(stats.messageCount) turns")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
@@ -122,14 +144,55 @@ private struct AccountCard: View {
     }
 }
 
+/// The Codex figures that have no Claude counterpart, and the caveat that goes with them.
+private struct CodexNotes: View {
+    var stats: CodexStats?
+
+    var body: some View {
+        if let stats {
+            VStack(alignment: .leading, spacing: 4) {
+                if let blocked = stats.blockedReason {
+                    Label(blocked, systemImage: "exclamationmark.octagon")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+
+                HStack(spacing: 10) {
+                    if stats.currentStreakDays > 0 {
+                        Text("\(stats.currentStreakDays) day streak")
+                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                    if stats.longestStreakDays > 0 {
+                        Text("best \(stats.longestStreakDays)")
+                            .font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
+                    }
+                    // Backend-formatted strings, shown exactly as Codex sends them.
+                    if let credits = stats.creditsBalance {
+                        Text("\(credits) credits")
+                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                    if let used = stats.spendUsed, let limit = stats.spendLimit {
+                        Text("\(used) of \(limit)")
+                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                Text("Codex reports token totals by day, with no model breakdown and no per-turn record, so there's no five-hour figure and no API-equivalent value to show for it.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
 private struct EmptyStateView: View {
     var searchedDirectories: [URL]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("No Claude accounts found", systemImage: "questionmark.folder")
+            Label("No accounts found", systemImage: "questionmark.folder")
                 .font(.headline)
-            Text("Looked for `~/.claude` and `~/.claude-*` directories containing a `.claude.json`.")
+            Text("Looked for `~/.claude` and `~/.claude-*` directories containing a `.claude.json`, and for a `codex` CLI to ask.")
                 .font(.caption).foregroundStyle(.secondary)
             if !searchedDirectories.isEmpty {
                 Text(searchedDirectories.map(\.lastPathComponent).joined(separator: ", "))
@@ -186,9 +249,31 @@ private struct FooterView: View {
                 }
             }
 
+            Toggle("Codex usage (runs the codex CLI)", isOn: $monitor.codexEnabled)
+                .font(.caption)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+
+            if monitor.codexEnabled {
+                if let error = monitor.codexError {
+                    Text(error)
+                        .font(.caption2).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Asks `codex app-server` for your rate limits every 5 minutes. Codex caches nothing on disk, so these figures only exist while this app is running, and it never touches `auth.json`, because the CLI owns those tokens and refreshes them itself.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let path = monitor.codexPath {
+                    Text(path)
+                        .font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+            }
+
             // The widget only sees what this app last wrote, so it stops updating if
             // the app isn't running. Worth saying plainly rather than hiding.
-            Text("Keep this app running (or launching at login) so the widget stays current. Limit percentages come from Claude Code's local cache and refresh whenever you use Claude Code. Token counts, value and burn history are read from your transcripts — the value shown is what that usage would have cost at Claude API list rates, not a charge on your plan.")
+            Text("Keep this app running (or launching at login) so the widget stays current. Claude limit percentages come from Claude Code's local cache and refresh whenever you use Claude Code. Token counts, value and burn history are read from your transcripts — the value shown is what that usage would have cost at Claude API list rates, not a charge on your plan.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 

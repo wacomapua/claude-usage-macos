@@ -66,6 +66,32 @@ func stressSnapshot(now: Date) -> UsageSnapshot {
                 )
             ),
             AccountUsage(
+                id: "codex", label: "Codex", email: "codex@example.com",
+                plan: "Free", fetchedAt: now,
+                // A free Codex plan meters over 30 days, so this is the case where
+                // treating the primary window as five hours would read wildly wrong.
+                session: Gauge(percent: 99, resetsAt: now.addingTimeInterval(3600 * 24 * 23),
+                               windowDuration: 30 * 24 * 60 * 60),
+                weekly: nil,
+                scoped: [],
+                spend: nil,
+                isLive: true,
+                provider: .codex,
+                codex: CodexStats(
+                    lifetimeTokens: 1_524_159_434,
+                    peakDailyTokens: 88_967_039,
+                    currentStreakDays: 3,
+                    longestStreakDays: 57,
+                    windowTokens: 41_200_000,
+                    days: (0..<30).map { index in
+                        DayBucket(day: now.addingTimeInterval(Double(index - 29) * 86400),
+                                  tokens: [2, 0, 0, 9, 14, 3, 0, 22, 31, 8, 0, 0, 17, 44, 26,
+                                           0, 51, 39, 12, 0, 0, 64, 48, 21, 9, 0, 33, 72, 55, 18][index] * 1_000_000)
+                    },
+                    blockedReason: "rate limit reached"
+                )
+            ),
+            AccountUsage(
                 id: ".claude-stale", label: "Idle", email: "stale@example.com",
                 plan: "Pro", fetchedAt: now.addingTimeInterval(-3600 * 30),
                 // Reset time already passed — must render as "reset", not as 47%.
@@ -112,6 +138,18 @@ func main() {
             TokenFormat.compact(stats?.sessionTokens ?? 0),
             TokenFormat.money(stats?.weekCost ?? 0),
             stats?.messageCount ?? 0
+        ))
+    }
+
+    // Codex has no config file to build from; it only ever answers over its
+    // app-server. So ask it the same way the app does, and skip it without comment
+    // when the CLI isn't installed.
+    if let codex = try? CodexReader.read(now: now) {
+        snapshot.accounts.append(codex)
+        print(String(
+            format: "read Codex: %@ plan, %d%% of %@, %@ lifetime tokens",
+            codex.plan, codex.session?.percent ?? 0, codex.primaryCaption,
+            CodexFormat.tokens(codex.codex?.lifetimeTokens ?? 0)
         ))
     }
 
